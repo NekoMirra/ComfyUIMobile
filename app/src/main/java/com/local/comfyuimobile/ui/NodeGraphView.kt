@@ -1,0 +1,373 @@
+package com.local.comfyuimobile.ui
+
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.sp
+import com.local.comfyuimobile.model.WorkflowLink
+import com.local.comfyuimobile.model.WorkflowNode
+import kotlin.math.min
+
+/** 节点在前端缺失尺寸时使用的兜底宽高（画布坐标单位）。 */
+private const val FALLBACK_NODE_WIDTH = 180f
+private const val FALLBACK_NODE_HEIGHT = 72f
+
+/** 用户可缩放到的最小比例：再小就没有可读性了。 */
+private const val USER_MIN_SCALE = 0.2f
+private const val USER_MAX_SCALE = 3f
+
+/** 自动适配时允许的最小比例，保证再大的工作流也能整体看见。 */
+private const val FIT_MIN_SCALE = 0.05f
+
+/** 低于该比例时只画色块，不再绘制标题与类型文本。 */
+private const val DETAIL_SCALE = 0.45f
+
+private const val FIT_PADDING = 32f
+private const val NODE_CORNER = 10f
+private const val NODE_PADDING = 8f
+private const val PROGRESS_BAR_HEIGHT = 5f
+
+private val NodeTitleStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+private val NodeTypeStyle = TextStyle(fontSize = 10.sp)
+
+private data class NodeBox(
+    val node: WorkflowNode,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+}
+
+private data class NodeGraphColors(
+    val nodeFill: Color,
+    val nodeBorder: Color,
+    val selectedBorder: Color,
+    val executingBorder: Color,
+    val titleText: Color,
+    val typeText: Color,
+    val progressTrack: Color,
+    val progressFill: Color,
+    val linkPalette: List<Color>,
+)
+
+/**
+ * 工作流节点图。
+ *
+ * 只负责展示与交互，不依赖 ViewModel：调用方把节点、连线、选中项、执行进度传进来，
+ * 点击节点通过 [onSelectNode] 回调。
+ *
+ * @param nodes 节点列表，位置与尺寸来自前端工作流。
+ * @param links 连线列表。
+ * @param selectedNodeId 当前选中的节点 id。
+ * @param executingNodeIds 正在执行的节点 id。
+ * @param nodeProgress 节点执行进度（0f..1f），缺失时画不确定态进度条。
+ * @param onSelectNode 点击节点时的回调。
+ */
+@Composable
+fun NodeGraphView(
+    nodes: List<WorkflowNode>,
+    links: List<WorkflowLink>,
+    selectedNodeId: String?,
+    executingNodeIds: Set<String>,
+    nodeProgress: Map<String, Float>,
+    onSelectNode: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val colors = remember(scheme) { scheme.toGraphColors() }
+    val textMeasurer = rememberTextMeasurer()
+    val boxes = remember(nodes) { layoutNodes(nodes) }
+    val byId = remember(boxes) { boxes.associateBy { it.node.id } }
+
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+
+    // 手势回调里必须读到最新的缩放与偏移，否则拖拽会用旧值跳回去。
+    val latestScale by rememberUpdatedState(scale)
+    val latestOffset by rememberUpdatedState(offset)
+    val latestBoxes by rememberUpdatedState(boxes)
+    val latestOnSelectNode by rememberUpdatedState(onSelectNode)
+
+    val fitKey = remember(nodes) {
+        nodes.joinToString("|") { "${it.id}:${it.posX}:${it.posY}:${it.sizeX}:${it.sizeY}" }
+    }
+    LaunchedEffect(fitKey, viewport) {
+        if (viewport.width <= 0 || viewport.height <= 0) return@LaunchedEffect
+        val fit = fitTransform(boxes, viewport.width.toFloat(), viewport.height.toFloat())
+        scale = fit.first
+        offset = fit.second
+    }
+
+    val indeterminate = rememberInfiniteTransition(label = "node-graph-progress")
+    val indeterminatePhase by indeterminate.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
+        label = "node-graph-indeterminate",
+    )
+
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            .onSizeChanged { viewport = it }
+            .pointerInput(Unit) {
+                detectTapGestures { tap ->
+                    val currentScale = if (latestScale > 0f) latestScale else 1f
+                    val graphX = (tap.x - latestOffset.x) / currentScale
+                    val graphY = (tap.y - latestOffset.y) / currentScale
+                    val hit = latestBoxes.firstOrNull { box ->
+                        graphX >= box.left && graphX <= box.right && graphY >= box.top && graphY <= box.bottom
+                    }
+                    if (hit != null) latestOnSelectNode(hit.node.id)
+                }
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { centroid, pan, zoom, _ ->
+                    val current = if (latestScale > 0f) latestScale else 1f
+                    val next = (current * zoom).coerceIn(USER_MIN_SCALE, USER_MAX_SCALE)
+                    val graphX = (centroid.x - latestOffset.x) / current
+                    val graphY = (centroid.y - latestOffset.y) / current
+                    scale = next
+                    offset = Offset(
+                        centroid.x - graphX * next + pan.x,
+                        centroid.y - graphY * next + pan.y,
+                    )
+                }
+            },
+    ) {
+        val canvasScale = if (scale > 0f) scale else 1f
+        val toScreenX: (Float) -> Float = { value -> value * canvasScale + offset.x }
+        val toScreenY: (Float) -> Float = { value -> value * canvasScale + offset.y }
+
+        // 连线画在节点下面。
+        links.forEach { link ->
+            val origin = byId[link.originId] ?: return@forEach
+            val target = byId[link.targetId] ?: return@forEach
+            val start = Offset(toScreenX(origin.right), toScreenY((origin.top + origin.bottom) / 2f))
+            val end = Offset(toScreenX(target.left), toScreenY((target.top + target.bottom) / 2f))
+            val controlOffset = ((end.x - start.x) / 2f).coerceAtLeast(24f)
+            val path = Path().apply {
+                moveTo(start.x, start.y)
+                cubicTo(
+                    start.x + controlOffset,
+                    start.y,
+                    end.x - controlOffset,
+                    end.y,
+                    end.x,
+                    end.y,
+                )
+            }
+            drawPath(
+                path = path,
+                color = colors.linkColor(origin.node.type),
+                style = Stroke(width = if (canvasScale >= DETAIL_SCALE) 2f else 1f),
+            )
+        }
+
+        boxes.forEach { box ->
+            val node = box.node
+            val left = toScreenX(box.left)
+            val top = toScreenY(box.top)
+            val width = box.width * canvasScale
+            val height = box.height * canvasScale
+            if (width <= 0f || height <= 0f) return@forEach
+            val executing = executingNodeIds.contains(node.id)
+            val selected = selectedNodeId == node.id
+            val accent = colors.linkColor(node.type)
+            val radius = CornerRadius(NODE_CORNER.coerceAtMost(min(width, height) / 3f), NODE_CORNER.coerceAtMost(min(width, height) / 3f))
+
+            drawRoundRect(
+                color = colors.nodeFill,
+                topLeft = Offset(left, top),
+                size = Size(width, height),
+                cornerRadius = radius,
+            )
+            if (executing) {
+                drawRoundRect(
+                    color = colors.executingBorder,
+                    topLeft = Offset(left, top),
+                    size = Size(width, height),
+                    cornerRadius = radius,
+                    style = Stroke(width = 4f),
+                )
+            }
+            if (selected) {
+                drawRoundRect(
+                    color = colors.selectedBorder,
+                    topLeft = Offset(left, top),
+                    size = Size(width, height),
+                    cornerRadius = radius,
+                    style = Stroke(width = 3f),
+                )
+            }
+            if (!executing && !selected) {
+                drawRoundRect(
+                    color = colors.nodeBorder,
+                    topLeft = Offset(left, top),
+                    size = Size(width, height),
+                    cornerRadius = radius,
+                    style = Stroke(width = 1.5f),
+                )
+            }
+
+            if (canvasScale >= DETAIL_SCALE) {
+                val title = textMeasurer.measure(node.title.ifBlank { node.type }, NodeTitleStyle)
+                drawText(
+                    textLayoutResult = title,
+                    color = colors.titleText,
+                    topLeft = Offset(left + NODE_PADDING, top + NODE_PADDING),
+                )
+                if (height >= 46f && node.type.isNotBlank() && node.type != node.title) {
+                    val type = textMeasurer.measure(node.type, NodeTypeStyle)
+                    drawText(
+                        textLayoutResult = type,
+                        color = colors.typeText,
+                        topLeft = Offset(left + NODE_PADDING, top + NODE_PADDING + title.size.height + 2f),
+                    )
+                }
+            } else {
+                // 缩得太小时只留一个色块与标题首字，避免糊成一团。
+                drawRect(
+                    color = accent,
+                    topLeft = Offset(left, top),
+                    size = Size(width.coerceAtMost(18f), height.coerceAtMost(18f)),
+                )
+                val initial = node.title.ifBlank { node.type }.take(1)
+                if (initial.isNotBlank() && width >= 14f && height >= 14f) {
+                    val initialLayout = textMeasurer.measure(initial, NodeTitleStyle)
+                    drawText(
+                        textLayoutResult = initialLayout,
+                        color = colors.titleText,
+                        topLeft = Offset(left + width / 2f - initialLayout.size.width / 2f, top + height / 2f - initialLayout.size.height / 2f),
+                    )
+                }
+            }
+
+            if (executing) {
+                val barTop = top + height + 4f
+                val barWidth = width
+                drawRoundRect(
+                    color = colors.progressTrack,
+                    topLeft = Offset(left, barTop),
+                    size = Size(barWidth, PROGRESS_BAR_HEIGHT),
+                    cornerRadius = CornerRadius(PROGRESS_BAR_HEIGHT / 2f, PROGRESS_BAR_HEIGHT / 2f),
+                )
+                val progress = nodeProgress[node.id]
+                if (progress != null) {
+                    val ratio = progress.coerceIn(0f, 1f)
+                    if (ratio > 0f) {
+                        drawRoundRect(
+                            color = colors.progressFill,
+                            topLeft = Offset(left, barTop),
+                            size = Size(barWidth * ratio, PROGRESS_BAR_HEIGHT),
+                            cornerRadius = CornerRadius(PROGRESS_BAR_HEIGHT / 2f, PROGRESS_BAR_HEIGHT / 2f),
+                        )
+                    }
+                } else {
+                    // 没有进度值：画不确定态的一段滑动条。
+                    val segment = barWidth * 0.3f
+                    val travel = (barWidth + segment) * indeterminatePhase - segment
+                    drawRoundRect(
+                        color = colors.progressFill,
+                        topLeft = Offset(left + travel, barTop),
+                        size = Size(segment, PROGRESS_BAR_HEIGHT),
+                        cornerRadius = CornerRadius(PROGRESS_BAR_HEIGHT / 2f, PROGRESS_BAR_HEIGHT / 2f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun ColorScheme.toGraphColors(): NodeGraphColors = NodeGraphColors(
+    nodeFill = surfaceVariant,
+    nodeBorder = outlineVariant,
+    selectedBorder = primary,
+    executingBorder = tertiary,
+    titleText = onSurface,
+    typeText = onSurfaceVariant,
+    progressTrack = surfaceVariant,
+    progressFill = primary,
+    linkPalette = listOf(
+        primary,
+        secondary,
+        tertiary,
+        primaryContainer,
+        secondaryContainer,
+        tertiaryContainer,
+    ),
+)
+
+/** 同一节点类型始终得到同一种颜色，颜色全部来自 Material 主题，不写死色值。 */
+private fun NodeGraphColors.linkColor(type: String): Color {
+    if (linkPalette.isEmpty()) return progressFill
+    if (type.isEmpty()) return linkPalette.last()
+    var hash = 0
+    type.forEach { char -> hash = hash * 31 + char.code }
+    val index = ((hash % linkPalette.size) + linkPalette.size) % linkPalette.size
+    return linkPalette[index]
+}
+
+private fun layoutNodes(nodes: List<WorkflowNode>): List<NodeBox> = nodes.map { node ->
+    val width = if (node.sizeX > 1f) node.sizeX else FALLBACK_NODE_WIDTH
+    val height = if (node.sizeY > 1f) node.sizeY else FALLBACK_NODE_HEIGHT
+    NodeBox(
+        node = node,
+        left = node.posX,
+        top = node.posY,
+        right = node.posX + width,
+        bottom = node.posY + height,
+    )
+}
+
+/** 把全部节点缩放进视口，返回比例与偏移。 */
+private fun fitTransform(boxes: List<NodeBox>, width: Float, height: Float): Pair<Float, Offset> {
+    if (boxes.isEmpty()) return 1f to Offset.Zero
+    val minX = boxes.minOf { it.left }
+    val maxX = boxes.maxOf { it.right }
+    val minY = boxes.minOf { it.top }
+    val maxY = boxes.maxOf { it.bottom }
+    val contentWidth = (maxX - minX).coerceAtLeast(1f)
+    val contentHeight = (maxY - minY).coerceAtLeast(1f)
+    val usableWidth = (width - FIT_PADDING * 2f).coerceAtLeast(1f)
+    val usableHeight = (height - FIT_PADDING * 2f).coerceAtLeast(1f)
+    val fitScale = min(usableWidth / contentWidth, usableHeight / contentHeight)
+        .coerceIn(FIT_MIN_SCALE, 1.5f)
+    val offsetX = (width - contentWidth * fitScale) / 2f - minX * fitScale
+    val offsetY = (height - contentHeight * fitScale) / 2f - minY * fitScale
+    return fitScale to Offset(offsetX, offsetY)
+}

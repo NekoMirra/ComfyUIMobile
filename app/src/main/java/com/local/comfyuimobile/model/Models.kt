@@ -71,7 +71,41 @@ data class WorkflowNode(
     val isOutput: Boolean = false,
     val inputMarkers: List<WorkflowConnectionMarker> = emptyList(),
     val outputMarkers: List<WorkflowConnectionMarker> = emptyList(),
+    val posX: Float = 0f,
+    val posY: Float = 0f,
+    val sizeX: Float = 0f,
+    val sizeY: Float = 0f,
 )
+
+/**
+ * 节点在画布上的一条连线。
+ *
+ * ComfyUI 前端的 rootGraph.links 是 linkId → {origin_id, origin_slot, target_id, target_slot}
+ * 的映射；工作流 JSON 自身的 links 则是 [id, origin_id, origin_slot, target_id, target_slot, type]
+ * 数组。这里统一成扁平结构，供节点图直接绘制。
+ */
+data class WorkflowLink(
+    val linkId: String,
+    val originId: String,
+    val originSlot: Int,
+    val targetId: String,
+    val targetSlot: Int,
+)
+
+/**
+ * 节点的执行模式，对应 ComfyUI API prompt 里节点对象的 "mode" 字段。
+ */
+enum class NodeMode(val wireValue: Int, val displayName: String) {
+    ALWAYS(0, "始终执行"),
+    MUTE(2, "静音"),
+    BYPASS(4, "绕过"),
+    ;
+
+    companion object {
+        fun fromWireValue(value: Int): NodeMode =
+            entries.firstOrNull { it.wireValue == value } ?: ALWAYS
+    }
+}
 
 data class WorkflowConnectionMarker(
     val label: String,
@@ -83,6 +117,7 @@ data class WorkflowConnectionMarker(
 data class WorkflowManifest(
     val fields: List<ParameterField>,
     val nodes: List<WorkflowNode>,
+    val links: List<WorkflowLink> = emptyList(),
 )
 
 data class WorkflowDocument(
@@ -90,6 +125,7 @@ data class WorkflowDocument(
     val rawJson: String,
     val fields: List<ParameterField>,
     val nodes: List<WorkflowNode> = emptyList(),
+    val links: List<WorkflowLink> = emptyList(),
     val serverUrl: String = "",
     val baseModified: Double = entry.modified,
     val hasUnsavedChanges: Boolean = false,
@@ -198,6 +234,10 @@ data class AppUiState(
     val activeJobId: String? = null,
     val currentExecutingNodeId: String? = null,
     val generationProgress: Float? = null,
+    val selectedNodeId: String? = null,
+    val nodeModes: Map<String, NodeMode> = emptyMap(),
+    val executingNodeIds: Set<String> = emptySet(),
+    val nodeProgress: Map<String, Float> = emptyMap(),
     val generationMessage: String = "",
     val navigationRequest: AppNavigationRequest? = null,
     val promptHistory: List<String> = emptyList(),
