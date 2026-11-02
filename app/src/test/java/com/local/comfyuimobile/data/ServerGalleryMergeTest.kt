@@ -182,9 +182,10 @@ class ServerGalleryMergeTest {
         assertEquals(MediaKind.IMAGE, fromAsset.kind)
         assertTrue(fromAsset.url.startsWith("$baseUrl/view?filename=pic.png"))
 
-        val fromJob = ServerGalleryMerge.jobPreviewToMedia(baseUrl, job(filename = "sub/pic.png"))
+        val fromJob = ServerGalleryMerge.jobPreviewToMedia(baseUrl, job(filename = "pic.png", subfolder = "sub"))
         assertEquals("job-1", fromJob?.jobId)
         assertEquals("sub", fromJob?.subfolder)
+        assertEquals("pic.png", fromJob?.filename)
     }
 
     @Test
