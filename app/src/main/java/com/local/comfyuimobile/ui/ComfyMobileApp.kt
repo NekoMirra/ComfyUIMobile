@@ -69,6 +69,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -78,6 +79,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -91,6 +93,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -102,6 +105,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.VideoFile
@@ -159,6 +164,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
@@ -167,12 +173,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -189,8 +197,13 @@ import com.local.comfyuimobile.bridge.ComfyBridge
 import com.local.comfyuimobile.bridge.FieldValidator
 import com.local.comfyuimobile.bridge.ImageListValue
 import com.local.comfyuimobile.data.CachePolicy
+import com.local.comfyuimobile.data.PromptEntry
+import com.local.comfyuimobile.data.PromptHistory
+import com.local.comfyuimobile.data.PromptLibrarySelection
+import com.local.comfyuimobile.data.PromptLibraryStore
 import com.local.comfyuimobile.data.ResultParameterReport
 import com.local.comfyuimobile.data.RecentWorkflows
+import com.local.comfyuimobile.data.ServerGalleryMerge
 import com.local.comfyuimobile.data.WorkflowBrowser
 import com.local.comfyuimobile.data.WorkflowPath
 import com.local.comfyuimobile.model.AppDestination
@@ -199,15 +212,19 @@ import com.local.comfyuimobile.model.ConnectionStatus
 import com.local.comfyuimobile.model.JobState
 import com.local.comfyuimobile.model.JobSummary
 import com.local.comfyuimobile.model.MediaKind
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.ParameterField
 import com.local.comfyuimobile.model.ParameterKind
 import com.local.comfyuimobile.model.ParameterSection
 import com.local.comfyuimobile.model.ResultMedia
 import com.local.comfyuimobile.model.ResultSource
+import com.local.comfyuimobile.model.ServerAsset
+import com.local.comfyuimobile.model.ServerJob
 import com.local.comfyuimobile.model.ServerProfile
 import com.local.comfyuimobile.model.WorkflowEntry
 import com.local.comfyuimobile.model.WorkflowConnectionMarker
 import com.local.comfyuimobile.model.WorkflowNode
+import com.local.comfyuimobile.network.ServerAssetsClient
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -224,14 +241,17 @@ private enum class MainPage(val label: String, val icon: ImageVector) {
 }
 
 private enum class ResultLayout { ALL, ALBUMS }
+private enum class ResultSegment { LOCAL, CLOUD, SERVER }
 private data class ResultAlbum(val jobId: String, val media: List<ResultMedia>)
 
 @Composable
 fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val clipboard = LocalClipboardManager.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGuide by rememberSaveable { mutableStateOf(false) }
+    var showCapabilitySheet by remember { mutableStateOf(false) }
     val needsGuide = state.preferencesLoaded && !state.onboardingCompleted
     val context = LocalContext.current
     val advancedEditorLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -306,7 +326,25 @@ fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
         }
         if (showSettings) {
             Box(if (showGuide) Modifier.clearAndSetSemantics { } else Modifier) {
-                SettingsScreen(state, viewModel, snackbar, onOpenGuide = { showGuide = true }) { showSettings = false }
+                SettingsScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    snackbar = snackbar,
+                    onOpenGuide = { showGuide = true },
+                    capabilities = state.serverCapabilities,
+                    capabilitiesLoading = state.serverCapabilitiesLoading,
+                    capabilitiesError = state.serverCapabilitiesError,
+                    onOpenCapabilities = { showCapabilitySheet = true },
+                    onRefreshCapabilities = viewModel::refreshServerCapabilities,
+                    onCopyDiagnostics = { text ->
+                        clipboard.setText(AnnotatedString(text))
+                        viewModel.postNotice("诊断信息已复制到剪贴板")
+                    },
+                    onRenameServer = viewModel::renameServer,
+                    onSetServerPinned = viewModel::setServerPinned,
+                    onRemoveServer = viewModel::removeServer,
+                    pinnedServerUrls = state.pinnedServerUrls,
+                ) { showSettings = false }
             }
         }
         if (!state.preferencesLoaded) {
@@ -317,17 +355,43 @@ fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
                 showGuide = false
             })
         }
+        if (showCapabilitySheet) {
+            ServerCapabilitySheet(
+                capabilities = state.serverCapabilities,
+                loading = state.serverCapabilitiesLoading,
+                error = state.serverCapabilitiesError,
+                onRefresh = viewModel::refreshServerCapabilities,
+                onCopyDiagnostics = { text ->
+                    clipboard.setText(AnnotatedString(text))
+                    viewModel.postNotice("诊断信息已复制到剪贴板")
+                },
+                onDismiss = { showCapabilitySheet = false },
+            )
+        }
     }
 }
 
 @Composable
 private fun ConnectionPage(state: AppUiState, viewModel: MainViewModel, snackbar: SnackbarHostState, onOpenSettings: () -> Unit, onOpenGuide: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
     ConnectionScreen(
         state = state, snackbar = snackbar, onOpenSettings = onOpenSettings,
         onServerInput = viewModel::setServerInput,
         onConnect = { address -> viewModel.setServerInput(address); viewModel.connect(address) },
         onScan = viewModel::scanLan, onRemoveServer = viewModel::removeServer,
         onOpenGuide = onOpenGuide,
+        capabilities = state.serverCapabilities,
+        capabilitiesLoading = state.serverCapabilitiesLoading,
+        capabilitiesError = state.serverCapabilitiesError,
+        onRefreshCapabilities = viewModel::refreshServerCapabilities,
+        onCopyDiagnostics = { text ->
+            clipboard.setText(AnnotatedString(text))
+            viewModel.postNotice("诊断信息已复制到剪贴板")
+        },
+        diagnosis = state.connectionDiagnosis,
+        pinnedServerUrls = state.pinnedServerUrls,
+        onRenameServer = viewModel::renameServer,
+        onSetServerPinned = viewModel::setServerPinned,
     )
 }
 
@@ -383,7 +447,7 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var page by rememberSaveable { mutableStateOf(MainPage.WORKFLOWS) }
     val pageStates = rememberSaveableStateHolder()
-    var resultSource by rememberSaveable { mutableStateOf(ResultSource.LOCAL) }
+    var resultSegment by rememberSaveable { mutableStateOf(ResultSegment.LOCAL) }
     var resultLayout by rememberSaveable { mutableStateOf(ResultLayout.ALBUMS) }
     var resultAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = page == MainPage.RESULTS && resultAlbumId != null) {
@@ -398,10 +462,10 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
         if (request.destination == AppDestination.RESULTS && request.jobId != null) {
             resultLayout = ResultLayout.ALBUMS
             resultAlbumId = request.jobId
-            resultSource = if (state.localResults.any { it.jobId == request.jobId }) {
-                ResultSource.LOCAL
+            resultSegment = if (state.localResults.any { it.jobId == request.jobId }) {
+                ResultSegment.LOCAL
             } else {
-                ResultSource.CLOUD
+                ResultSegment.CLOUD
             }
             viewModel.refreshResults()
             viewModel.refreshLocalResults()
@@ -410,8 +474,8 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     }
     LaunchedEffect(resultAlbumId, state.localResults, state.results) {
         val jobId = resultAlbumId ?: return@LaunchedEffect
-        if (state.localResults.any { it.jobId == jobId }) resultSource = ResultSource.LOCAL
-        else if (state.results.any { it.jobId == jobId }) resultSource = ResultSource.CLOUD
+        if (state.localResults.any { it.jobId == jobId }) resultSegment = ResultSegment.LOCAL
+        else if (state.results.any { it.jobId == jobId }) resultSegment = ResultSegment.CLOUD
     }
     val toolbar: @Composable (Modifier) -> Unit = { modifier ->
         StudioToolbar(
@@ -482,9 +546,9 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
                         MainPage.RESULTS -> ResultScreen(
                             state = state,
                             viewModel = viewModel,
-                            source = resultSource,
-                            onSourceChange = {
-                                resultSource = it
+                            segment = resultSegment,
+                            onSegmentChange = {
+                                resultSegment = it
                                 resultAlbumId = null
                             },
                             layout = resultLayout,
@@ -763,6 +827,14 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
     var historyField by remember { mutableStateOf<ParameterField?>(null) }
     var uploadField by remember { mutableStateOf<ParameterField?>(null) }
     var cacheNode by remember { mutableStateOf<WorkflowNode?>(null) }
+    var graphExpanded by remember(workflow.entry.path) { mutableStateOf(true) }
+    var serverPickerField by remember { mutableStateOf<ParameterField?>(null) }
+    var libraryField by remember { mutableStateOf<ParameterField?>(null) }
+    var showLibraryBrowser by remember { mutableStateOf(false) }
+    val serverAssetsClient = remember { ServerAssetsClient() }
+    val serverBaseUrl = state.activeServer?.baseUrl.orEmpty()
+    val applicationContext = LocalContext.current.applicationContext
+    val promptLibraryStore = remember(applicationContext) { PromptLibraryStore(applicationContext) }
     var recentMenuExpanded by remember { mutableStateOf(false) }
     var saveAsDialog by remember { mutableStateOf(false) }
     var saveAsName by remember { mutableStateOf("") }
@@ -868,6 +940,9 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                                 enabled = !state.loading && !state.generating,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                             ) { Text("保存", maxLines = 1) }
+                            IconButton(onClick = { showLibraryBrowser = true }) {
+                                Icon(Icons.AutoMirrored.Filled.LibraryBooks, "浏览提示词库")
+                            }
                             Box {
                                 IconButton(onClick = { toolbarMenuExpanded = true }) { Icon(Icons.Default.MoreHoriz, "参数页操作") }
                                 DropdownMenu(expanded = toolbarMenuExpanded, onDismissRequest = { toolbarMenuExpanded = false }) {
@@ -894,6 +969,63 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                         }
                     }
                 }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("节点图", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            Text(
+                                "${workflow.nodes.size} 个节点 · 点节点可定位参数",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            IconButton(onClick = { graphExpanded = !graphExpanded }) {
+                                Icon(
+                                    if (graphExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    if (graphExpanded) "收起节点图" else "展开节点图",
+                                )
+                            }
+                        }
+                        if (graphExpanded) {
+                            if (workflow.nodes.isEmpty()) {
+                                Text(
+                                    "当前工作流没有可显示的节点",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                NodeGraphView(
+                                    nodes = workflow.nodes,
+                                    links = workflow.links,
+                                    selectedNodeId = state.selectedNodeId,
+                                    executingNodeIds = state.executingNodeIds,
+                                    nodeProgress = state.nodeProgress,
+                                    nodeModes = state.nodeModes,
+                                    onSelectNode = { nodeId ->
+                                        viewModel.selectNode(nodeId)
+                                        expandedNodeIds = expandedNodeIds + nodeId
+                                        parameterScope.launch {
+                                            kotlinx.coroutines.delay(80)
+                                            nodeRequesters[nodeId]?.bringIntoView()
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                )
+                                Text(
+                                    "静音 / 绕过的节点会被淡化并标注角标，生成时不会进入执行链",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
                 nodes.forEach { (node, fields) ->
                     key(node.id) {
                         val nodeId = node.id
@@ -907,12 +1039,21 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                             cached = state.cacheOutputRules.any {
                                 it.enabled && it.serverUrl == state.activeServer?.baseUrl && it.nodeType == node.type
                             },
+                            mode = state.nodeModes[nodeId] ?: NodeMode.ALWAYS,
+                            onModeChange = { mode -> viewModel.setNodeMode(nodeId, mode) },
+                            panelNodeId = state.nodePanelNodeId,
+                            panelLoading = state.nodePanelLoading,
+                            panelError = state.nodePanelError,
+                            panelChanged = state.nodePanelChanged,
                             onToggle = {
                                 expandedNodeIds = if (nodeId in expandedNodeIds) expandedNodeIds - nodeId else expandedNodeIds + nodeId
                             },
                             onLongPress = if (node.isOutput) ({ cacheNode = node }) else null,
                             viewModel = viewModel,
                             onHistory = { historyField = it },
+                            onOpenLibrary = { libraryField = it },
+                            onServerPick = { field -> serverPickerField = field },
+                            serverBaseUrl = serverBaseUrl,
                             onUpload = { field ->
                                 uploadField = field
                                 if (field.kind == ParameterKind.VIDEO) {
@@ -999,7 +1140,41 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
             viewModel::dismissWorkflowOverwrite,
         ) { viewModel.saveWorkflow(force = true) }
     }
-    if (historyField != null) PromptHistoryDialog(historyField!!, state, viewModel) { historyField = null }
+    if (historyField != null) PromptHistoryDialog(historyField, state, viewModel) { historyField = null }
+    if (showLibraryBrowser) PromptHistoryDialog(null, state, viewModel) { showLibraryBrowser = false }
+    if (libraryField != null) {
+        val target = libraryField
+        PromptLibrarySheet(
+            store = promptLibraryStore,
+            onDismiss = { libraryField = null },
+            onConfirmed = { entries ->
+                libraryField = null
+                if (target != null && entries.isNotEmpty()) {
+                    viewModel.updateField(target.key, PromptLibrarySelection.join(entries))
+                }
+            },
+        )
+    }
+    serverPickerField?.let { field ->
+        ServerAssetPickerSheet(
+            client = serverAssetsClient,
+            baseUrl = serverBaseUrl,
+            onDismiss = { serverPickerField = null },
+            onPicked = { asset ->
+                val value = ServerGalleryMerge.loadImageValue(
+                    asset.assetTag()?.toTagValue() ?: "input",
+                    asset.subFolder(),
+                    asset.fileName(),
+                )
+                if (field.kind == ParameterKind.IMAGE_LIST) {
+                    viewModel.updateField(field.key, ImageListValue.append(field.displayValue, listOf(value)))
+                } else {
+                    viewModel.updateField(field.key, value)
+                }
+                serverPickerField = null
+            },
+        )
+    }
     if (layoutDialog) LayoutDialog(state.fields, viewModel) { layoutDialog = false }
     if (saveAsDialog) {
         SaveWorkflowAsDialog(
@@ -1050,10 +1225,19 @@ private fun NodeParameterCard(
     active: Boolean,
     problems: List<String>,
     cached: Boolean,
+    mode: NodeMode,
+    onModeChange: (NodeMode) -> Unit,
+    panelNodeId: String?,
+    panelLoading: Boolean,
+    panelError: String?,
+    panelChanged: Map<String, String>,
     onToggle: () -> Unit,
     onLongPress: (() -> Unit)?,
     viewModel: MainViewModel,
     onHistory: (ParameterField) -> Unit,
+    onOpenLibrary: (ParameterField) -> Unit,
+    onServerPick: (ParameterField) -> Unit,
+    serverBaseUrl: String,
     onUpload: (ParameterField) -> Unit,
     multilineEditorStates: MutableMap<String, TextFieldValue>,
     onMultilineFocusGained: () -> Unit,
@@ -1119,6 +1303,11 @@ private fun NodeParameterCard(
                         if (cached) Text("本地保存白名单", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
                         if (node.isOutput) Text("长按管理本地保存", style = MaterialTheme.typography.labelSmall)
                         if (active) Text("正在执行", color = Color(0xFF35C46A), style = MaterialTheme.typography.labelMedium)
+                        NodeModeSelector(
+                            mode = mode,
+                            onModeChange = onModeChange,
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
                     }
                     Spacer(Modifier.width(6.dp))
                     Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "收起" else "展开")
@@ -1129,6 +1318,32 @@ private fun NodeParameterCard(
                     HorizontalDivider()
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         problems.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { viewModel.openNodePanel(node.id) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("打开节点面板")
+                            }
+                            if (panelNodeId == node.id) {
+                                Text(
+                                    when {
+                                        panelLoading -> "正在打开…"
+                                        panelError != null -> panelError
+                                        panelChanged.isNotEmpty() -> "面板已回写 ${panelChanged.size} 项参数"
+                                        else -> "面板已就绪"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (panelError != null) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
                         if (fields.isEmpty()) {
                             Text("此部件没有可调整参数。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -1143,6 +1358,9 @@ private fun NodeParameterCard(
                                             field,
                                             viewModel,
                                             onHistory = { onHistory(field) },
+                                            onOpenLibrary = { onOpenLibrary(field) },
+                                            onServerPick = { onServerPick(field) },
+                                            serverBaseUrl = serverBaseUrl,
                                             onUpload = { onUpload(field) },
                                             multilineEditorStates = multilineEditorStates,
                                             onMultilineFocusGained = onMultilineFocusGained,
@@ -1224,6 +1442,9 @@ private fun ParameterEditor(
     field: ParameterField,
     viewModel: MainViewModel,
     onHistory: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onServerPick: () -> Unit,
+    serverBaseUrl: String,
     onUpload: () -> Unit,
     multilineEditorStates: MutableMap<String, TextFieldValue>,
     onMultilineFocusGained: () -> Unit,
@@ -1240,8 +1461,13 @@ private fun ParameterEditor(
                     Text(field.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (field.kind == ParameterKind.MULTILINE) IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.History, "历史", modifier = Modifier.size(20.dp))
+            if (field.kind == ParameterKind.MULTILINE) {
+                IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.History, "历史", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenLibrary, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.LibraryBooks, "提示词库", modifier = Modifier.size(20.dp))
+                }
             }
         }
         if (field.linked) Text("已由其他部件连接，当前值只读", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
@@ -1268,13 +1494,33 @@ private fun ParameterEditor(
                     enabled = !field.linked,
                     singleLine = true,
                 )
-                FilledTonalButton(onClick = onUpload, enabled = !field.linked) {
-                    Icon(if (field.kind == ParameterKind.VIDEO) Icons.Default.VideoFile else Icons.Default.UploadFile, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (field.kind == ParameterKind.VIDEO) "从视频相册选择并上传" else "从相册选择并上传")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onUpload, enabled = !field.linked) {
+                        Icon(if (field.kind == ParameterKind.VIDEO) Icons.Default.VideoFile else Icons.Default.UploadFile, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (field.kind == ParameterKind.VIDEO) "从视频相册选择并上传" else "从相册选择并上传")
+                    }
+                    if (field.kind == ParameterKind.IMAGE) {
+                        FilledTonalButton(onClick = onServerPick, enabled = !field.linked && serverBaseUrl.isNotBlank()) {
+                            Icon(Icons.Default.CloudDownload, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("服务器选图")
+                        }
+                    }
+                }
+                if (field.kind == ParameterKind.IMAGE) {
+                    ServerImagePreview(serverBaseUrl, field.displayValue)
                 }
             }
-            ParameterKind.IMAGE_LIST -> ImageListField(field, viewModel, onUpload)
+            ParameterKind.IMAGE_LIST -> {
+                ImageListField(field, viewModel, onUpload)
+                FilledTonalButton(onClick = onServerPick, enabled = !field.linked && serverBaseUrl.isNotBlank()) {
+                    Icon(Icons.Default.CloudDownload, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("服务器选图")
+                }
+                ImageListPreview(serverBaseUrl, field.displayValue)
+            }
             ParameterKind.MULTILINE -> MultilineTextField(
                 field,
                 viewModel,
@@ -1288,6 +1534,54 @@ private fun ParameterEditor(
                 enabled = !field.linked,
             )
             ParameterKind.UNSUPPORTED -> Text(field.warning ?: "此控件需在高级编辑中修改", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** 服务器图片字段的缩略预览：字段值能解析成服务器文件时才显示。 */
+@Composable
+private fun ServerImagePreview(baseUrl: String, value: String) {
+    if (baseUrl.isBlank()) return
+    val ref = ServerGalleryMerge.parseImageValue(value) ?: return
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ServerImageThumb(
+            baseUrl = baseUrl,
+            filename = ref.filename,
+            subfolder = ref.subfolder,
+            type = ref.type,
+            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+            contentDescription = ref.filename,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(ref.filename, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                "服务器 ${ref.type} 目录${if (ref.subfolder.isBlank()) "" else " · ${ref.subfolder}"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** 多图字段的缩略预览。 */
+@Composable
+private fun ImageListPreview(baseUrl: String, value: String) {
+    if (baseUrl.isBlank()) return
+    val items = ImageListValue.parse(value).orEmpty()
+    if (items.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.take(6).forEach { item ->
+            val ref = ServerGalleryMerge.parseImageValue(item) ?: return@forEach
+            ServerImageThumb(
+                baseUrl = baseUrl,
+                filename = ref.filename,
+                subfolder = ref.subfolder,
+                type = ref.type,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                contentDescription = ref.filename,
+            )
         }
     }
 }
@@ -1424,28 +1718,91 @@ private fun ParameterHistoryScreen(state: AppUiState, viewModel: MainViewModel) 
     }
 }
 
+/**
+ * 文本历史 / 提示词库对话框。
+ *
+ * @param field 目标字段。为 null 时进入浏览模式：只做搜索、收藏、删除、复制，
+ *        不会把内容回写到任何字段。
+ */
 @Composable
-private fun PromptHistoryDialog(field: ParameterField, state: AppUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
+private fun PromptHistoryDialog(field: ParameterField?, state: AppUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val libraryEntries = remember(state.promptLibrary, query) {
+        viewModel.promptLibraryEntries(query, null)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("文本历史（${state.promptHistory.size}/50）") },
+        title = {
+            Text(
+                if (field == null) {
+                    "提示词库（${state.promptLibrary.size}）"
+                } else {
+                    "文本历史（${state.promptHistory.size}/${PromptHistory.MAX_SIZE}）"
+                },
+            )
+        },
         text = {
             Column {
                 OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索") })
-                LazyColumn(Modifier.fillMaxHeight(0.6f)) {
-                    items(state.promptHistory.filter { query.isBlank() || it.contains(query, true) }) { value ->
-                        Row(Modifier.fillMaxWidth().clickable { viewModel.updateField(field.key, value); onDismiss() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(value, Modifier.weight(1f), maxLines = 3)
-                            IconButton(onClick = { viewModel.removePromptHistory(value) }) { Icon(Icons.Default.Delete, "删除") }
+                if (field == null) {
+                    LazyColumn(Modifier.fillMaxHeight(0.6f)) {
+                        items(libraryEntries, key = { it.id }) { entry ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.text, maxLines = 3)
+                                    Text(
+                                        "${entry.category} · 用过 ${entry.useCount} 次",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                IconButton(onClick = {
+                                    clipboard.setText(AnnotatedString(entry.text))
+                                }) { Icon(Icons.Default.ContentCopy, "复制") }
+                                IconButton(
+                                    onClick = {
+                                        if (entry.pinned) viewModel.unpinPrompt(entry.id) else viewModel.pinPrompt(entry.id)
+                                    },
+                                ) {
+                                    Icon(
+                                        if (entry.pinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                        if (entry.pinned) "取消收藏" else "收藏",
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.removePrompt(entry.id) }) {
+                                    Icon(Icons.Default.Delete, "删除")
+                                }
+                            }
+                            HorizontalDivider()
                         }
-                        HorizontalDivider()
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxHeight(0.6f)) {
+                        items(state.promptHistory.filter { query.isBlank() || it.contains(query, true) }) { value ->
+                            Row(Modifier.fillMaxWidth().clickable { viewModel.updateField(field.key, value); onDismiss() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(value, Modifier.weight(1f), maxLines = 3)
+                                IconButton(onClick = { viewModel.removePromptHistory(value) }) { Icon(Icons.Default.Delete, "删除") }
+                            }
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-        dismissButton = { TextButton(onClick = viewModel::clearPromptHistory) { Text("清空") } },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    if (field == null) viewModel.clearPromptLibrary() else viewModel.clearPromptHistory()
+                },
+            ) { Text("清空") }
+        },
     )
 }
 
@@ -1482,8 +1839,8 @@ private fun LayoutDialog(fields: List<ParameterField>, viewModel: MainViewModel,
 private fun ResultScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    source: ResultSource,
-    onSourceChange: (ResultSource) -> Unit,
+    segment: ResultSegment,
+    onSegmentChange: (ResultSegment) -> Unit,
     layout: ResultLayout,
     onLayoutChange: (ResultLayout) -> Unit,
     selectedAlbumId: String?,
@@ -1494,6 +1851,11 @@ private fun ResultScreen(
     var confirmDeleteSelection by remember { mutableStateOf(false) }
     var galleryItems by remember { mutableStateOf<List<ResultMedia>>(emptyList()) }
     var galleryInitialIndex by remember { mutableIntStateOf(0) }
+    val source = if (segment == ResultSegment.LOCAL) ResultSource.LOCAL else ResultSource.CLOUD
+    val serverBaseUrl = state.activeServer?.baseUrl.orEmpty()
+    val serverAssetsClient = remember { ServerAssetsClient() }
+    // 统一作品列表：服务器历史与手机本地 / 云端作品按文件身份去重后合并。
+    val mergedMedia = remember(state.mergedResults) { state.mergedResults }
     val media = (if (source == ResultSource.LOCAL) state.localResults else state.results)
         .sortedWith(compareByDescending<ResultMedia> { it.createdAt }.thenByDescending { it.taskNumber })
     val albums = media.groupBy { it.jobId }
@@ -1516,7 +1878,19 @@ private fun ResultScreen(
             selectedMedia = item
         }
     }
-    LaunchedEffect(source) { selectedKeys = emptySet() }
+    /** 打开服务器缩略图：复用现有的全屏图片浏览器，列表是统一作品列表。 */
+    fun openServerMedia(item: ResultMedia) {
+        val images = (mergedMedia + item).distinctBy { it.stableKey() }.filter { it.kind == MediaKind.IMAGE }
+        galleryInitialIndex = images.indexOfFirst { it.stableKey() == item.stableKey() }.coerceAtLeast(0)
+        galleryItems = images
+    }
+    LaunchedEffect(segment) { selectedKeys = emptySet() }
+    LaunchedEffect(segment, serverBaseUrl) {
+        if (segment == ResultSegment.SERVER && serverBaseUrl.isNotBlank()) {
+            viewModel.loadServerAssets(reset = true)
+            viewModel.loadServerJobs(reset = true)
+        }
+    }
     LaunchedEffect(media.map(ResultMedia::stableKey)) {
         selectedKeys = selectedKeys.intersect(media.map(ResultMedia::stableKey).toSet())
     }
@@ -1524,9 +1898,9 @@ private fun ResultScreen(
     val resultHeader: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             StudioChoices(
-                labels = listOf("本地作品", "云端作品"),
-                selected = if (source == ResultSource.LOCAL) 0 else 1,
-                onSelect = { onSourceChange(if (it == 0) ResultSource.LOCAL else ResultSource.CLOUD) },
+                labels = listOf("本地作品", "云端作品", "服务器"),
+                selected = segment.ordinal,
+                onSelect = { onSegmentChange(ResultSegment.entries[it]) },
                 modifier = Modifier.padding(top = 12.dp),
             )
             if (!selectionMode) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1535,14 +1909,38 @@ private fun ResultScreen(
                     Text("任务相册", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 } else {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(if (layout == ResultLayout.ALL) "全部作品" else "任务相册", style = MaterialTheme.typography.titleMedium)
-                        Text("${media.size} 项作品 · 长按可多选", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            when (segment) {
+                                ResultSegment.SERVER -> "服务器作品"
+                                else -> if (layout == ResultLayout.ALL) "全部作品" else "任务相册"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            when (segment) {
+                                ResultSegment.SERVER -> "${mergedMedia.size} 项作品 · 服务器图片与历史生成"
+                                else -> "${media.size} 项作品 · 长按可多选"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    IconButton(onClick = { onLayoutChange(if (layout == ResultLayout.ALL) ResultLayout.ALBUMS else ResultLayout.ALL) }) {
-                        Icon(if (layout == ResultLayout.ALL) Icons.Default.PhotoAlbum else Icons.Default.GridView, if (layout == ResultLayout.ALL) "切换到任务相册" else "切换到全部平铺")
+                    if (segment != ResultSegment.SERVER) {
+                        IconButton(onClick = { onLayoutChange(if (layout == ResultLayout.ALL) ResultLayout.ALBUMS else ResultLayout.ALL) }) {
+                            Icon(if (layout == ResultLayout.ALL) Icons.Default.PhotoAlbum else Icons.Default.GridView, if (layout == ResultLayout.ALL) "切换到任务相册" else "切换到全部平铺")
+                        }
                     }
                 }
-                IconButton(onClick = { if (source == ResultSource.LOCAL) viewModel.refreshLocalResults() else viewModel.refreshResults() }) { Icon(Icons.Default.Refresh, "刷新作品") }
+                IconButton(onClick = {
+                    when (segment) {
+                        ResultSegment.LOCAL -> viewModel.refreshLocalResults()
+                        ResultSegment.CLOUD -> viewModel.refreshResults()
+                        ResultSegment.SERVER -> {
+                            viewModel.loadServerAssets(reset = true)
+                            viewModel.loadServerJobs(reset = true)
+                        }
+                    }
+                }) { Icon(Icons.Default.Refresh, "刷新作品") }
             }
             selectedAlbum?.let { Text(albumTitle(it), style = MaterialTheme.typography.titleMedium) }
         }
@@ -1560,6 +1958,24 @@ private fun ResultScreen(
             }
         }
         when {
+            segment == ResultSegment.SERVER -> Column(Modifier.fillMaxSize()) {
+                resultHeader()
+                if (serverBaseUrl.isBlank()) {
+                    EmptyState(Icons.Default.CloudOff, "尚未连接服务器\n连接后即可浏览服务器图片与历史生成")
+                } else {
+                    ServerGalleryView(
+                        client = serverAssetsClient,
+                        baseUrl = serverBaseUrl,
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenAsset = { asset: ServerAsset ->
+                            openServerMedia(ServerGalleryMerge.assetToMedia(serverBaseUrl, asset))
+                        },
+                        onOpenJobPreview = { job: ServerJob ->
+                            ServerGalleryMerge.jobPreviewToMedia(serverBaseUrl, job)?.let { openServerMedia(it) }
+                        },
+                    )
+                }
+            }
             selectedAlbum != null -> ResultMediaGrid(
                 media = selectedAlbum.media,
                 selectedKeys = selectedKeys,
@@ -2101,7 +2517,9 @@ private fun BackendScreen(state: AppUiState, viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "backend-connection") {
-            Box(Modifier.padding(top = 12.dp)) { BackendConnectionCard(state, viewModel::refreshOrReconnect) }
+            Box(Modifier.padding(top = 12.dp)) {
+                BackendConnectionCard(state, viewModel::refreshOrReconnect, state.serverCapabilities)
+            }
         }
         item(key = "task-filter") {
             StudioChoices(listOf("全部任务", "本 App 任务"), if (appOnly) 1 else 0, { appOnly = it == 1 })

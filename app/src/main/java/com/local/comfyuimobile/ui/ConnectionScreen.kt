@@ -22,18 +22,23 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +51,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -57,6 +66,11 @@ import androidx.compose.ui.unit.dp
 import com.local.comfyuimobile.model.AppUiState
 import com.local.comfyuimobile.model.ConnectionStatus
 import com.local.comfyuimobile.model.ServerProfile
+import com.local.comfyuimobile.network.Diagnosis
+import com.local.comfyuimobile.network.ServerCapabilities
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,7 +83,19 @@ internal fun ConnectionScreen(
     onScan: () -> Unit,
     onRemoveServer: (String) -> Unit,
     onOpenGuide: () -> Unit = {},
+    capabilities: ServerCapabilities? = null,
+    capabilitiesLoading: Boolean = false,
+    capabilitiesError: String? = null,
+    onOpenCapabilities: () -> Unit = {},
+    onRefreshCapabilities: () -> Unit = {},
+    onCopyDiagnostics: (String) -> Unit = {},
+    diagnosis: Diagnosis? = null,
+    pinnedServerUrls: Set<String> = emptySet(),
+    onRenameServer: (String, String) -> Unit = { _, _ -> },
+    onSetServerPinned: (String, Boolean) -> Unit = { _, _ -> },
 ) {
+    var renamingProfile by remember { mutableStateOf<ServerProfile?>(null) }
+    var capabilitySheetVisible by remember { mutableStateOf(false) }
     Scaffold(
         modifier = Modifier.imePadding(),
         topBar = {
@@ -91,7 +117,20 @@ internal fun ConnectionScreen(
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val expanded = maxWidth >= 720.dp
             val controls: @Composable () -> Unit = {
-                ConnectionControls(state, onServerInput, onConnect, onScan, onRemoveServer)
+                ConnectionControls(
+                    state = state,
+                    capabilities = capabilities,
+                    diagnosis = diagnosis,
+                    pinnedServerUrls = pinnedServerUrls,
+                    onServerInput = onServerInput,
+                    onConnect = onConnect,
+                    onScan = onScan,
+                    onRemoveServer = onRemoveServer,
+                    onSetServerPinned = onSetServerPinned,
+                    onRequestRename = { renamingProfile = it },
+                    onOpenCapabilities = { capabilitySheetVisible = true },
+                    onRefreshCapabilities = onRefreshCapabilities,
+                )
             }
             if (expanded) {
                 Row(
@@ -111,6 +150,46 @@ internal fun ConnectionScreen(
                 }
             }
         }
+    }
+
+    renamingProfile?.let { profile ->
+        var draftName by remember(profile.baseUrl) { mutableStateOf(profile.name) }
+        AlertDialog(
+            onDismissRequest = { renamingProfile = null },
+            title = { Text("重命名服务器") },
+            text = {
+                OutlinedTextField(
+                    value = draftName,
+                    onValueChange = { draftName = it },
+                    singleLine = true,
+                    label = { Text("名称") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameServer(profile.baseUrl, draftName.trim())
+                        renamingProfile = null
+                    },
+                    enabled = draftName.isNotBlank(),
+                ) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { renamingProfile = null }) { Text("取消") } },
+        )
+    }
+
+    if (capabilitySheetVisible) {
+        ServerCapabilitySheet(
+            capabilities = capabilities,
+            loading = capabilitiesLoading,
+            error = capabilitiesError,
+            onRefresh = {
+                capabilitySheetVisible = true
+                onRefreshCapabilities()
+            },
+            onCopyDiagnostics = onCopyDiagnostics,
+            onDismiss = { capabilitySheetVisible = false },
+        )
     }
 }
 
@@ -152,10 +231,17 @@ private fun ConnectionFeature(icon: ImageVector, title: String, description: Str
 @Composable
 private fun ConnectionControls(
     state: AppUiState,
+    capabilities: ServerCapabilities?,
+    diagnosis: Diagnosis?,
+    pinnedServerUrls: Set<String>,
     onServerInput: (String) -> Unit,
     onConnect: (String) -> Unit,
     onScan: () -> Unit,
     onRemoveServer: (String) -> Unit,
+    onSetServerPinned: (String, Boolean) -> Unit,
+    onRequestRename: (ServerProfile) -> Unit,
+    onOpenCapabilities: () -> Unit,
+    onRefreshCapabilities: () -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -193,22 +279,106 @@ private fun ConnectionControls(
             }
         }
     }
+    if (capabilities != null || state.status == ConnectionStatus.CONNECTED) {
+        ServerCapabilitySummaryRow(
+            capabilities = capabilities,
+            onOpen = onOpenCapabilities,
+            onRefresh = onRefreshCapabilities,
+        )
+    }
+    diagnosis?.let { ConnectionDiagnosisCard(it) }
     if (state.status == ConnectionStatus.CONNECTING || state.status == ConnectionStatus.ERROR) ConnectionProgressCard(state)
     if (state.savedServers.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ConnectionSectionLabel("已保存的工作站", state.savedServers.size)
             state.savedServers.forEach { profile ->
-                ConnectionServerTile(profile, { onConnect(profile.baseUrl) }, { onRemoveServer(profile.baseUrl) })
+                ConnectionServerTile(
+                    profile = profile,
+                    onClick = { onConnect(profile.baseUrl) },
+                    pinned = profile.baseUrl in pinnedServerUrls,
+                    meta = savedServerMeta(profile),
+                    onRename = { onRequestRename(profile) },
+                    onTogglePin = { onSetServerPinned(profile.baseUrl, profile.baseUrl !in pinnedServerUrls) },
+                    onDelete = { onRemoveServer(profile.baseUrl) },
+                )
             }
         }
     }
     if (state.discoveredServers.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ConnectionSectionLabel("发现的设备", state.discoveredServers.size)
-            state.discoveredServers.forEach { profile -> ConnectionServerTile(profile, { onConnect(profile.baseUrl) }) }
+            state.discoveredServers.forEach { profile ->
+                ConnectionServerTile(
+                    profile = profile,
+                    onClick = { onConnect(profile.baseUrl) },
+                    meta = discoveredServerMeta(profile),
+                )
+            }
         }
     }
     Text("支持局域网 / VPN 的 HTTP 地址，以及云端完整 ComfyUI 实例的 HTTPS 根地址。云端链接按平台原样粘贴；需要平台登录或 API Key 的服务暂不支持。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun ServerCapabilitySummaryRow(
+    capabilities: ServerCapabilities?,
+    onOpen: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("服务器能力", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    capabilities?.summaryLine() ?: "点击查看服务器版本、队列与显卡状态",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "刷新服务器能力", Modifier.size(20.dp)) }
+            TextButton(onClick = onOpen) { Text("详情") }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionDiagnosisCard(diagnosis: Diagnosis) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                diagnosis.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                diagnosis.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            if (diagnosis.actions.isNotEmpty()) {
+                Text("建议处理", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer)
+                diagnosis.actions.forEach { action ->
+                    Text(
+                        "· $action",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -220,7 +390,16 @@ private fun ConnectionSectionLabel(title: String, count: Int) {
 }
 
 @Composable
-private fun ConnectionServerTile(profile: ServerProfile, onClick: () -> Unit, onDelete: (() -> Unit)? = null) {
+private fun ConnectionServerTile(
+    profile: ServerProfile,
+    onClick: () -> Unit,
+    pinned: Boolean = false,
+    meta: String = "",
+    onRename: (() -> Unit)? = null,
+    onTogglePin: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
@@ -231,10 +410,64 @@ private fun ConnectionServerTile(profile: ServerProfile, onClick: () -> Unit, on
                 Icon(Icons.Default.Wifi, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(profile.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(profile.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (pinned) Icon(Icons.Default.PushPin, "已置顶", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                }
                 Text(profile.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (meta.isNotBlank()) {
+                    Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-            if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Default.DeleteOutline, "删除服务器 ${profile.name}", Modifier.size(20.dp)) }
+            if (onRename != null || onTogglePin != null || onDelete != null) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp)) }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (onRename != null) {
+                            DropdownMenuItem(
+                                text = { Text("重命名") },
+                                onClick = {
+                                    menuOpen = false
+                                    onRename()
+                                },
+                            )
+                        }
+                        if (onTogglePin != null) {
+                            DropdownMenuItem(
+                                text = { Text(if (pinned) "取消置顶" else "置顶") },
+                                onClick = {
+                                    menuOpen = false
+                                    onTogglePin()
+                                },
+                            )
+                        }
+                        if (onDelete != null) {
+                            DropdownMenuItem(
+                                text = { Text("删除") },
+                                onClick = {
+                                    menuOpen = false
+                                    onDelete()
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
+/** Saved servers show the last known ComfyUI version and the last successful use. */
+private fun savedServerMeta(profile: ServerProfile): String {
+    val version = profile.comfyVersion.takeIf { it.isNotBlank() }?.let { "ComfyUI $it" } ?: "版本未知"
+    val seen = if (profile.lastSeen > 0L) {
+        "最后使用 ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(profile.lastSeen))}"
+    } else {
+        "尚未连接成功"
+    }
+    return "$version · $seen"
+}
+
+/** Discovered servers report the probed version, or state that it is unknown. */
+private fun discoveredServerMeta(profile: ServerProfile): String =
+    profile.comfyVersion.takeIf { it.isNotBlank() }?.let { "ComfyUI $it" } ?: "已连通，版本未知"
