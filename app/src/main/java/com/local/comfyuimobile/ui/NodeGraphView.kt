@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.WorkflowLink
 import com.local.comfyuimobile.model.WorkflowNode
 import kotlin.math.min
@@ -59,6 +60,7 @@ private const val PROGRESS_BAR_HEIGHT = 5f
 
 private val NodeTitleStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
 private val NodeTypeStyle = TextStyle(fontSize = 10.sp)
+private val NodeBadgeStyle = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold)
 
 private data class NodeBox(
     val node: WorkflowNode,
@@ -80,6 +82,8 @@ private data class NodeGraphColors(
     val typeText: Color,
     val progressTrack: Color,
     val progressFill: Color,
+    val modeBadge: Color,
+    val modeBadgeText: Color,
     val linkPalette: List<Color>,
 )
 
@@ -94,6 +98,7 @@ private data class NodeGraphColors(
  * @param selectedNodeId 当前选中的节点 id。
  * @param executingNodeIds 正在执行的节点 id。
  * @param nodeProgress 节点执行进度（0f..1f），缺失时画不确定态进度条。
+ * @param nodeModes 各节点的执行模式，静音 / 绕过的节点会被淡化并加上角标。
  * @param onSelectNode 点击节点时的回调。
  */
 @Composable
@@ -105,6 +110,7 @@ fun NodeGraphView(
     nodeProgress: Map<String, Float>,
     onSelectNode: (String) -> Unit,
     modifier: Modifier = Modifier,
+    nodeModes: Map<String, NodeMode> = emptyMap(),
 ) {
     val scheme = MaterialTheme.colorScheme
     val colors = remember(scheme) { scheme.toGraphColors() }
@@ -207,11 +213,13 @@ fun NodeGraphView(
             if (width <= 0f || height <= 0f) return@forEach
             val executing = executingNodeIds.contains(node.id)
             val selected = selectedNodeId == node.id
+            val mode = nodeModes[node.id] ?: NodeMode.ALWAYS
+            val dimmed = mode != NodeMode.ALWAYS
             val accent = colors.linkColor(node.type)
             val radius = CornerRadius(NODE_CORNER.coerceAtMost(min(width, height) / 3f), NODE_CORNER.coerceAtMost(min(width, height) / 3f))
 
             drawRoundRect(
-                color = colors.nodeFill,
+                color = if (dimmed) colors.nodeFill.copy(alpha = 0.45f) else colors.nodeFill,
                 topLeft = Offset(left, top),
                 size = Size(width, height),
                 cornerRadius = radius,
@@ -248,15 +256,33 @@ fun NodeGraphView(
                 val title = textMeasurer.measure(node.title.ifBlank { node.type }, NodeTitleStyle)
                 drawText(
                     textLayoutResult = title,
-                    color = colors.titleText,
+                    color = if (dimmed) colors.titleText.copy(alpha = 0.7f) else colors.titleText,
                     topLeft = Offset(left + NODE_PADDING, top + NODE_PADDING),
                 )
                 if (height >= 46f && node.type.isNotBlank() && node.type != node.title) {
                     val type = textMeasurer.measure(node.type, NodeTypeStyle)
                     drawText(
                         textLayoutResult = type,
-                        color = colors.typeText,
+                        color = if (dimmed) colors.typeText.copy(alpha = 0.7f) else colors.typeText,
                         topLeft = Offset(left + NODE_PADDING, top + NODE_PADDING + title.size.height + 2f),
+                    )
+                }
+                // 静音 / 绕过的节点加一个角标，避免和正常节点混在一起。
+                if (dimmed && width >= 34f && height >= 20f) {
+                    val badgeRadius = min(9f, height / 4f)
+                    val center = Offset(left + width - badgeRadius - 3f, top + badgeRadius + 3f)
+                    drawCircle(color = colors.modeBadge, radius = badgeRadius, center = center)
+                    val badge = textMeasurer.measure(
+                        if (mode == NodeMode.MUTE) "静" else "绕",
+                        NodeBadgeStyle,
+                    )
+                    drawText(
+                        textLayoutResult = badge,
+                        color = colors.modeBadgeText,
+                        topLeft = Offset(
+                            center.x - badge.size.width / 2f,
+                            center.y - badge.size.height / 2f,
+                        ),
                     )
                 }
             } else {
@@ -322,6 +348,8 @@ private fun ColorScheme.toGraphColors(): NodeGraphColors = NodeGraphColors(
     typeText = onSurfaceVariant,
     progressTrack = surfaceVariant,
     progressFill = primary,
+    modeBadge = error,
+    modeBadgeText = onError,
     linkPalette = listOf(
         primary,
         secondary,

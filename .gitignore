@@ -10,6 +10,8 @@ captures/
 *.keystore
 *.properties.local
 *.log
+# Local build helper with machine specific proxy / cache paths.
+build-local.bat
 .local/
 .codex-remote-attachments/
 .codex-attachments/

@@ -1,5 +1,10 @@
 package com.local.comfyuimobile.model
 
+import com.local.comfyuimobile.data.PromptEntry
+import com.local.comfyuimobile.data.ServerGalleryMerge
+import com.local.comfyuimobile.network.Diagnosis
+import com.local.comfyuimobile.network.ServerCapabilities
+
 enum class ConnectionStatus { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING, ERROR }
 
 data class ServerProfile(
@@ -262,4 +267,50 @@ data class AppUiState(
     val updateDownloading: Boolean = false,
     val updateDownloadProgress: Float? = null,
     val updateDownloadSource: String? = null,
-)
+
+    // ---- 服务器能力与连接诊断 ----
+    val serverCapabilities: ServerCapabilities? = null,
+    val serverCapabilitiesLoading: Boolean = false,
+    val serverCapabilitiesError: String? = null,
+    val connectionDiagnosis: Diagnosis? = null,
+
+    // ---- 服务器档案 ----
+    val pinnedServerUrls: Set<String> = emptySet(),
+
+    // ---- 服务器资产与历史 ----
+    val serverAssets: List<ServerAsset> = emptyList(),
+    val serverAssetsTotal: Int = 0,
+    val serverAssetsHasMore: Boolean = false,
+    val serverAssetsLoading: Boolean = false,
+    val serverAssetsError: String? = null,
+    val serverAssetTag: AssetTag? = null,
+    val serverAssetQuery: String = "",
+    val serverJobs: List<ServerJob> = emptyList(),
+    val serverJobsTotal: Int = 0,
+    val serverJobsHasMore: Boolean = false,
+    val serverJobsLoading: Boolean = false,
+
+    // ---- 提示词库 ----
+    val promptLibrary: List<PromptEntry> = emptyList(),
+    val promptLibraryLoading: Boolean = false,
+
+    // ---- 节点面板 ----
+    val nodePanelNodeId: String? = null,
+    val nodePanelLoading: Boolean = false,
+    val nodePanelError: String? = null,
+    val nodePanelChanged: Map<String, String> = emptyMap(),
+) {
+    /**
+     * 作品页的统一列表：服务器历史与手机本地 / 云端作品按文件身份去重后合并。
+     *
+     * 是派生值而不是状态字段，避免各处忘记刷新导致列表与数据源不一致。
+     */
+    val mergedResults: List<ResultMedia>
+        get() = ServerGalleryMerge.merge(
+            baseUrl = activeServer?.baseUrl.orEmpty(),
+            cloud = results,
+            local = localResults,
+            serverAssets = serverAssets,
+            serverJobs = serverJobs,
+        )
+}
