@@ -2,70 +2,46 @@ package com.local.comfyuimobile.ui
 
 import android.app.Activity
 import android.content.ContextWrapper
-import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import io.github.neoruaa.glasmio.core.GlassAppearance
+import io.github.neoruaa.glasmio.core.GlasmioTheme
+import io.github.neoruaa.glasmio.core.glasmioColorScheme
+import io.github.neoruaa.glasmio.core.glasmioTypography
 
-private val dark = darkColorScheme(
-    primary = Color(0xFFB4C2FF),
-    onPrimary = Color(0xFF182B72),
-    primaryContainer = Color(0xFF263963),
-    onPrimaryContainer = Color(0xFFE0E6FF),
-    secondary = Color(0xFF8FD6C6),
-    secondaryContainer = Color(0xFF203C36),
-    background = Color(0xFF101318),
-    surface = Color(0xFF191D25),
-    surfaceVariant = Color(0xFF252B36),
-    onSurface = Color(0xFFE9ECF3),
-    onSurfaceVariant = Color(0xFFA8B2C5),
-    outline = Color(0xFF687284),
-    outlineVariant = Color(0xFF343D4C),
-)
+/**
+ * Dark palette derived from Glasmio. Kept as an explicit access point because existing
+ * screens read the Material3 color scheme directly.
+ */
+val ComfyMobileDarkColorScheme: ColorScheme = glasmioColorScheme(isDark = true)
 
-private val light = lightColorScheme(
-    primary = Color(0xFF4D63CA),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFE9EDFF),
-    onPrimaryContainer = Color(0xFF263875),
-    secondary = Color(0xFF277D6D),
-    secondaryContainer = Color(0xFFE0F1EA),
-    background = Color(0xFFF5F6FA),
-    surface = Color.White,
-    surfaceVariant = Color(0xFFEDF0F6),
-    onSurface = Color(0xFF202737),
-    onSurfaceVariant = Color(0xFF697387),
-    outline = Color(0xFF8791A3),
-    outlineVariant = Color(0xFFDCE1EB),
-)
+/** Light palette derived from Glasmio. */
+val ComfyMobileLightColorScheme: ColorScheme = glasmioColorScheme(isDark = false)
 
-private val typography = Typography().let {
-    it.copy(
-        headlineLarge = it.headlineLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp),
-        headlineMedium = it.headlineMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
-        titleLarge = it.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-        titleMedium = it.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        titleSmall = it.titleSmall.copy(fontWeight = FontWeight.Medium),
-        bodySmall = it.bodySmall.copy(lineHeight = 18.sp),
-    )
-}
-
+/**
+ * Applies the Glasmio theme to [content].
+ *
+ * The theme follows the system light/dark setting. Colors, continuous shapes, spacing and
+ * typography come from Glasmio, which installs a Material3 [androidx.compose.material3.MaterialTheme]
+ * underneath, so existing Material3 components keep working and gain the continuous corner radii.
+ *
+ * @param reduceTransparency switches Glasmio to readable opaque surfaces and skips the
+ *   backdrop/refraction effects. Intended for the accessibility setting.
+ * @param liquidGlassEnabled turns the refraction channel on or off while keeping the blur.
+ */
 @Composable
-fun ComfyMobileTheme(content: @Composable () -> Unit) {
+fun ComfyMobileTheme(
+    reduceTransparency: Boolean = false,
+    liquidGlassEnabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     val darkTheme = isSystemInDarkTheme()
-    val colors = if (darkTheme) dark else light
+    val colors = if (darkTheme) ComfyMobileDarkColorScheme else ComfyMobileLightColorScheme
     val view = LocalView.current
     if (!view.isInEditMode) SideEffect {
         val activity = generateSequence(view.context) { (it as? ContextWrapper)?.baseContext }
@@ -81,12 +57,13 @@ fun ComfyMobileTheme(content: @Composable () -> Unit) {
             window.navigationBarColor = colors.background.toArgb()
         }
     }
-    MaterialTheme(
+    GlasmioTheme(
+        isDark = darkTheme,
         colorScheme = colors,
-        typography = typography,
-        shapes = Shapes(
-            extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(10.dp),
-            medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(32.dp),
+        typography = glasmioTypography(),
+        appearance = GlassAppearance(
+            liquidGlassEnabled = liquidGlassEnabled,
+            reduceTransparency = reduceTransparency,
         ),
         content = content,
     )
