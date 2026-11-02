@@ -51,7 +51,7 @@ internal fun BackendConnectionCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.content,
                 )
-                GlasmioBadge(
+                StudioBadge(
                     backendConnectionLabel(state),
                     color = if (online) appColors.success else appColors.danger,
                 )
@@ -68,7 +68,7 @@ internal fun BackendConnectionCard(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    badges.forEach { badge -> GlasmioBadge(badge) }
+                    badges.forEach { badge -> StudioBadge(badge) }
                 }
             }
             if (!online && state.connectionMessage.isNotBlank()) {
@@ -108,7 +108,7 @@ internal fun BackendConnectionCard(
                 val frontendVersion = capabilities?.frontendVersion?.takeIf { it.isNotBlank() }
                     ?: stats?.frontendVersion?.takeIf { it.isNotBlank() }
                 frontendVersion?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
+                    Text("前端 $it", style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
                 }
                 if (capabilities != null) {
                     Text(

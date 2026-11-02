@@ -331,7 +331,7 @@ internal fun SettingsScreen(
                                                         modifier = Modifier.weight(1f),
                                                         color = glasmioColors().content,
                                                     )
-                                                    if (profile.baseUrl in pinnedServerUrls) GlasmioBadge("已置顶")
+                                                    if (profile.baseUrl in pinnedServerUrls) StudioBadge("已置顶")
                                                 }
                                                 Text(
                                                     profile.baseUrl,

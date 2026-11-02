@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -60,7 +61,7 @@ internal fun toolbarTextShadow() = Shadow(glasmioColors().content.copy(alpha = 0
  * SF-Symbol names, not vector resources.
  */
 @Composable
-internal fun FloatingToolbarIcon(vector: ImageVector, description: String?, modifier: Modifier = Modifier, tint: Color = glasmioColors().secondaryContent) {
+internal fun FloatingToolbarIcon(vector: ImageVector, description: String?, modifier: Modifier = Modifier, tint: Color = glasmioMaterialColors().onSurfaceVariant) {
     Box(modifier) {
         Icon(vector, description, Modifier.size(24.dp), tint = tint)
     }
@@ -202,7 +203,7 @@ internal fun StudioToolbar(
                         tint = when {
                             failed -> appColors.danger
                             completed -> appColors.success
-                            else -> appColors.warning
+                            else -> glasmioColors().accent
                         },
                         maxLines = maxLines,
                         onDetails = { details = generation },
