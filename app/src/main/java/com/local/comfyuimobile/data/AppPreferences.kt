@@ -22,6 +22,7 @@ private val Context.dataStore by preferencesDataStore(name = "comfy_mobile")
 data class StoredSettings(
     val onboardingCompleted: Boolean = false,
     val profiles: List<ServerProfile> = emptyList(),
+    val pinnedServerUrls: Set<String> = emptySet(),
     val activeServerUrl: String = "",
     val promptHistory: List<String> = emptyList(),
     val submittedJobs: Set<String> = emptySet(),
@@ -58,15 +59,17 @@ class AppPreferences(context: Context, private val store: DataStore<Preferences>
         // unexpectedly turn an established install back into a first launch.
         store.edit { preferences ->
             if (preferences[Keys.onboardingCompleted] == null) {
-                preferences[Keys.onboardingCompleted] = decodeProfiles(preferences[Keys.profiles].orEmpty()).isNotEmpty()
+                preferences[Keys.onboardingCompleted] = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty()).isNotEmpty()
                     || !preferences[Keys.recentWorkflow].isNullOrBlank()
                     || !preferences[Keys.recentWorkflows].isNullOrBlank()
             }
         }
     }.map { preferences ->
+        val storedProfiles = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
         StoredSettings(
             onboardingCompleted = preferences[Keys.onboardingCompleted] ?: false,
-            profiles = decodeProfiles(preferences[Keys.profiles].orEmpty()),
+            profiles = ServerProfileStore.order(storedProfiles).map { it.profile },
+            pinnedServerUrls = storedProfiles.filter { it.pinned }.map { it.profile.baseUrl }.toSet(),
             activeServerUrl = preferences[Keys.activeServerUrl].orEmpty(),
             promptHistory = decodeStrings(preferences[Keys.promptHistory].orEmpty()).take(PromptHistory.MAX_SIZE),
             submittedJobs = decodeStrings(preferences[Keys.submittedJobs].orEmpty()).toSet(),
@@ -85,9 +88,9 @@ class AppPreferences(context: Context, private val store: DataStore<Preferences>
 
     suspend fun saveServer(profile: ServerProfile) {
         store.edit { preferences ->
-            val current = decodeProfiles(preferences[Keys.profiles].orEmpty())
-            val merged = listOf(profile) + current.filterNot { it.baseUrl == profile.baseUrl }
-            preferences[Keys.profiles] = encodeProfiles(merged.take(12))
+            val current = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
+            val merged = ServerProfileStore.merge(current, profile).take(ServerProfileStore.MAX_PROFILES)
+            preferences[Keys.profiles] = ServerProfileStore.encode(merged)
             preferences[Keys.activeServerUrl] = profile.baseUrl
         }
     }
@@ -100,20 +103,43 @@ class AppPreferences(context: Context, private val store: DataStore<Preferences>
     suspend fun rememberServerAddress(address: String) {
         val normalized = LanAddress.normalize(address)
         store.edit { preferences ->
-            val current = decodeProfiles(preferences[Keys.profiles].orEmpty())
-            val profile = current.firstOrNull { it.baseUrl == normalized }
-                ?: ServerProfile(java.util.UUID.nameUUIDFromBytes(normalized.toByteArray()).toString(),
-                    LanAddress.serverHost(normalized), normalized)
-            preferences[Keys.profiles] = encodeProfiles((listOf(profile) + current.filterNot { it.baseUrl == normalized }).take(12))
+            val current = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
+            val existing = current.firstOrNull { it.profile.baseUrl == normalized }
+            val profile = existing?.profile ?: ServerProfile(
+                java.util.UUID.nameUUIDFromBytes(normalized.toByteArray()).toString(),
+                LanAddress.serverHost(normalized),
+                normalized,
+            )
+            val merged = ServerProfileStore.merge(current, profile).take(ServerProfileStore.MAX_PROFILES)
+            preferences[Keys.profiles] = ServerProfileStore.encode(merged)
             preferences[Keys.activeServerUrl] = normalized
         }
     }
 
     suspend fun removeServer(baseUrl: String) {
         store.edit { preferences ->
-            val remaining = decodeProfiles(preferences[Keys.profiles].orEmpty()).filterNot { it.baseUrl == baseUrl }
-            preferences[Keys.profiles] = encodeProfiles(remaining)
+            val remaining = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
+                .filterNot { it.profile.baseUrl == baseUrl }
+            preferences[Keys.profiles] = ServerProfileStore.encode(remaining)
             if (preferences[Keys.activeServerUrl] == baseUrl) preferences.remove(Keys.activeServerUrl)
+        }
+    }
+
+    /** Rename a saved server. A blank name is ignored so the list never shows empty labels. */
+    suspend fun renameServer(baseUrl: String, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        store.edit { preferences ->
+            val current = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
+            preferences[Keys.profiles] = ServerProfileStore.encode(ServerProfileStore.rename(current, baseUrl, trimmed))
+        }
+    }
+
+    /** Pin a server to the top of the list, or release it back to the normal order. */
+    suspend fun setServerPinned(baseUrl: String, pinned: Boolean) {
+        store.edit { preferences ->
+            val current = ServerProfileStore.decode(preferences[Keys.profiles].orEmpty())
+            preferences[Keys.profiles] = ServerProfileStore.encode(ServerProfileStore.setPinned(current, baseUrl, pinned))
         }
     }
 
@@ -196,37 +222,6 @@ class AppPreferences(context: Context, private val store: DataStore<Preferences>
         store.edit { it[Keys.favoriteResultKeys] = encodeStrings(keys.take(1_000)) }
     }
 
-    private fun decodeProfiles(raw: String): List<ServerProfile> = runCatching {
-        val array = JSONArray(raw.ifBlank { "[]" })
-        buildList {
-            repeat(array.length()) { index ->
-                val item = array.getJSONObject(index)
-                add(
-                    ServerProfile(
-                        id = item.optString("id"),
-                        name = item.optString("name"),
-                        baseUrl = item.getString("baseUrl"),
-                        lastSeen = item.optLong("lastSeen"),
-                        comfyVersion = item.optString("comfyVersion"),
-                    ),
-                )
-            }
-        }
-    }.getOrDefault(emptyList())
-
-    private fun encodeProfiles(profiles: List<ServerProfile>): String = JSONArray().apply {
-        profiles.forEach { profile ->
-            put(
-                JSONObject()
-                    .put("id", profile.id)
-                    .put("name", profile.name)
-                    .put("baseUrl", profile.baseUrl)
-                    .put("lastSeen", profile.lastSeen)
-                    .put("comfyVersion", profile.comfyVersion),
-            )
-        }
-    }.toString()
-
     private fun decodeStrings(raw: String): List<String> = runCatching {
         val array = JSONArray(raw.ifBlank { "[]" })
         List(array.length()) { array.optString(it) }.filter { it.isNotBlank() }
@@ -261,4 +256,108 @@ class AppPreferences(context: Context, private val store: DataStore<Preferences>
                 )
             }
     }.getOrDefault(emptyList())
+}
+
+/**
+ * A saved server together with the metadata the server list needs.
+ *
+ * [pinned] keeps a server at the top of the list and [lastConnectedAt] records
+ * the last successful connection. Entries written by older builds simply do not
+ * carry those keys; they are decoded with the defaults below and rewritten in
+ * the current format on the next save.
+ */
+data class StoredServerProfile(
+    val profile: ServerProfile,
+    val pinned: Boolean = false,
+    val lastConnectedAt: Long = profile.lastSeen,
+)
+
+/**
+ * Pure codec and ordering rules for the saved server list.
+ *
+ * The encoding is a JSON array, one object per server. The first version only
+ * stored id / name / baseUrl / lastSeen / comfyVersion; the pinned flag and the
+ * last connection time were added later and default to safe values.
+ */
+object ServerProfileStore {
+    const val MAX_PROFILES = 12
+
+    fun decode(raw: String): List<StoredServerProfile> = runCatching {
+        val array = JSONArray(raw.ifBlank { "[]" })
+        buildList {
+            repeat(array.length()) { index ->
+                val item = array.optJSONObject(index) ?: return@repeat
+                val baseUrl = item.optString("baseUrl")
+                if (baseUrl.isBlank()) return@repeat
+                val lastSeen = item.optLong("lastSeen", 0L)
+                add(
+                    StoredServerProfile(
+                        profile = ServerProfile(
+                            id = item.optString("id"),
+                            name = item.optString("name"),
+                            baseUrl = baseUrl,
+                            lastSeen = lastSeen,
+                            comfyVersion = item.optString("comfyVersion"),
+                        ),
+                        pinned = item.optBoolean("pinned", false),
+                        lastConnectedAt = item.optLong("lastConnectedAt", lastSeen),
+                    ),
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    fun encode(profiles: List<StoredServerProfile>): String = JSONArray().apply {
+        profiles.forEach { stored ->
+            put(
+                JSONObject()
+                    .put("id", stored.profile.id)
+                    .put("name", stored.profile.name)
+                    .put("baseUrl", stored.profile.baseUrl)
+                    .put("lastSeen", stored.profile.lastSeen)
+                    .put("comfyVersion", stored.profile.comfyVersion)
+                    .put("pinned", stored.pinned)
+                    .put("lastConnectedAt", stored.lastConnectedAt),
+            )
+        }
+    }.toString()
+
+    /** Pinned servers first, then the most recently connected ones. */
+    fun order(profiles: List<StoredServerProfile>): List<StoredServerProfile> =
+        profiles.sortedWith(
+            compareByDescending<StoredServerProfile> { it.pinned }
+                .thenByDescending { it.lastConnectedAt },
+        )
+
+    /** Puts [incoming] first and keeps the pin flag of the entry it replaces. */
+    fun merge(current: List<StoredServerProfile>, incoming: ServerProfile): List<StoredServerProfile> {
+        val existing = current.firstOrNull { it.profile.baseUrl == incoming.baseUrl }
+        val stored = StoredServerProfile(
+            profile = incoming.copy(name = incoming.name.ifBlank { existing?.profile?.name ?: incoming.name }),
+            pinned = existing?.pinned ?: false,
+            lastConnectedAt = maxOf(existing?.lastConnectedAt ?: 0L, incoming.lastSeen),
+        )
+        return listOf(stored) + current.filterNot { it.profile.baseUrl == incoming.baseUrl }
+    }
+
+    fun rename(profiles: List<StoredServerProfile>, baseUrl: String, name: String): List<StoredServerProfile> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return profiles
+        return profiles.map { stored ->
+            if (stored.profile.baseUrl != baseUrl) {
+                stored
+            } else {
+                stored.copy(profile = stored.profile.copy(name = trimmed))
+            }
+        }
+    }
+
+    fun setPinned(profiles: List<StoredServerProfile>, baseUrl: String, pinned: Boolean): List<StoredServerProfile> =
+        profiles.map { stored ->
+            if (stored.profile.baseUrl != baseUrl) {
+                stored
+            } else {
+                stored.copy(pinned = pinned)
+            }
+        }
 }
