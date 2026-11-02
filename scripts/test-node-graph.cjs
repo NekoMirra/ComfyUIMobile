@@ -13,7 +13,7 @@ const manifestSource = read('app/src/main/java/com/local/comfyuimobile/bridge/Co
 
 /** 取出 Kotlin 里的 raw string 常量。 */
 function extractConst(name) {
-  const match = panelSource.match(new RegExp('private const val ' + name + '\\s*=\\s*"""\\n([\\s\\S]*?)"""'));
+  const match = panelSource.match(new RegExp('private const val ' + name + '\\s*=\\s*"""\\r?\\n([\\s\\S]*?)"""'));
   assert.ok(match, '缺少常量 ' + name);
   return match[1];
 }
@@ -21,7 +21,7 @@ function extractConst(name) {
 /** 取出 Kotlin 函数里返回的脚本模板。 */
 function extractTemplate(functionName) {
   const match = panelSource.match(
-    new RegExp('fun ' + functionName + '\\([\\s\\S]*?return """\\n([\\s\\S]*?)"""\\s*\\.trimIndent\\(\\)'),
+    new RegExp('fun ' + functionName + '\\([\\s\\S]*?return """\\r?\\n([\\s\\S]*?)"""\\s*\\.trimIndent\\(\\)'),
   );
   assert.ok(match, '缺少脚本模板 ' + functionName);
   return match[1];
@@ -91,6 +91,16 @@ function makeContext(state) {
 async function runScript(context, script) {
   const raw = await vm.runInNewContext(script, context);
   return JSON.parse(raw);
+}
+
+/** 按 ComfyBridge 里的 buildNodeModeScript 拼出注入脚本。 */
+function buildNodeModeScript(modes) {
+  const match = manifestSource.match(
+    /internal fun buildNodeModeScript\([\s\S]*?return """\r?\n([\s\S]*?)"""\s*\.trimIndent\(\)/,
+  );
+  assert.ok(match, '缺少 buildNodeModeScript');
+  const encoded = Buffer.from(JSON.stringify(modes), 'utf8').toString('base64');
+  return match[1].replace(/\$encoded/g, () => encoded);
 }
 
 /** 在 VM 里跑一遍生产用的清单脚本，确认新增的坐标、尺寸与连线真的被产出。 */
@@ -239,41 +249,87 @@ async function main() {
   assert.equal(await vm.runInNewContext(probeSource, probeWithoutGraph), '0');
 
   // 6. 节点模式：按同一套规则在 node 里复刻一遍，与 Kotlin 的实现交叉验证。
-  const prompt = '{"1":{"class_type":"KSampler","inputs":{"seed":42}},"2":{"class_type":"SaveImage","inputs":{}}}';
-  const modes = { 1: 0, 2: 4 };
-  const applyModes = (promptJson, nodeModes) => {
-    const parsed = JSON.parse(promptJson);
-    Object.entries(nodeModes).forEach(([nodeId, mode]) => {
-      if (parsed[nodeId]) parsed[nodeId].mode = mode;
+  //    mode 是 LiteGraph 节点模式（0 始终执行 / 2 静音 / 4 绕过），落在工作流 JSON
+  //    的 nodes[].mode 上；语义由官方前端构图时解析，服务端不读 prompt 里的 mode。
+  const workflow = {
+    nodes: [
+      { id: 1, type: 'CheckpointLoaderSimple', mode: 0 },
+      { id: '2', type: 'LoraLoader', mode: 0 },
+    ],
+    links: [[10, 1, 0, 2, 0, 'MODEL']],
+  };
+  const applyModesToWorkflow = (workflowJson, modes) => {
+    const parsed = JSON.parse(workflowJson);
+    const byId = new Map();
+    (parsed.nodes || []).forEach((item) => byId.set(String(item.id), item));
+    const missing = [];
+    Object.entries(modes).forEach(([id, mode]) => {
+      const target = byId.get(String(id));
+      if (!target) { missing.push(id); return; }
+      target.mode = mode;
     });
+    if (missing.length) throw new Error('工作流里找不到节点：' + missing.join(', '));
     return parsed;
   };
-  const applied = applyModes(prompt, modes);
-  assert.equal(applied['1'].mode, 0, 'ALWAYS 必须写 0');
-  assert.equal(applied['2'].mode, 4, 'BYPASS 必须写 4');
-  assert.equal(applied['1'].inputs.seed, 42, '其它字段不能被改写');
-  assert.equal(applied['1'].class_type, 'KSampler', '其它字段不能被改写');
-  const bypassed = Object.entries(applied).filter(([, node]) => node.mode && node.mode !== 0).map(([id]) => id);
-  assert.deepEqual(bypassed, ['2'], '必须能读出被绕过 / 静音的节点');
-  const unknown = applyModes(prompt, { 99: 2 });
-  assert.equal(unknown['99'], undefined, '不存在的节点不能被凭空创建');
+  const collectModes = (workflowJson) => {
+    const parsed = JSON.parse(workflowJson);
+    const modes = {};
+    (parsed.nodes || []).forEach((item) => { modes[String(item.id)] = item.mode === undefined ? 0 : item.mode; });
+    return modes;
+  };
+  const applied = applyModesToWorkflow(JSON.stringify(workflow), { 1: 0, 2: 4 });
+  assert.equal(applied.nodes[0].mode, 0, 'ALWAYS 必须写 0');
+  assert.equal(applied.nodes[1].mode, 4, 'BYPASS 必须写 4');
+  assert.equal(applied.nodes[1].type, 'LoraLoader', '其它字段不能被改写');
+  assert.equal(applied.links[0][0], 10, '连线不能被改写');
+  assert.deepEqual(collectModes(JSON.stringify(applied)), { 1: 0, 2: 4 });
+  assert.deepEqual(collectModes(JSON.stringify({ nodes: [{ id: 5 }] })), { 5: 0 });
+  assert.throws(() => applyModesToWorkflow(JSON.stringify(workflow), { 99: 2 }), /找不到节点/);
 
   // 7. Kotlin 侧必须与上面这套规则一致。
   assert.ok(modelSource.includes('ALWAYS(0'), 'NodeMode.ALWAYS 的 wire 值必须是 0');
   assert.ok(modelSource.includes('MUTE(2'), 'NodeMode.MUTE 的 wire 值必须是 2');
   assert.ok(modelSource.includes('BYPASS(4'), 'NodeMode.BYPASS 的 wire 值必须是 4');
-  assert.ok(policySource.includes('node.put("mode"'), 'NodeModePolicy 必须写入 mode 字段');
-  assert.ok(policySource.includes('mode != 0') || policySource.includes('!= NodeMode.ALWAYS.wireValue'),
-    'NodeModePolicy 必须能读出非 0 的 mode');
+  assert.ok(policySource.includes('applyToWorkflowJson'), 'NodeModePolicy 必须提供工作流 JSON 写入');
+  assert.ok(policySource.includes('collectModesFromWorkflowJson'), 'NodeModePolicy 必须提供工作流 JSON 读回');
+  assert.ok(policySource.includes('node.put("mode"'), 'NodeModePolicy 必须写 nodes[].mode');
+  assert.ok(!policySource.includes('applyToPrompt'), 'prompt 层不再写 mode：服务端不消费该字段');
+  assert.ok(!policySource.includes('collectBypassedNodes'), 'prompt 层不再读 mode');
+  assert.ok(manifestSource.includes('buildNodeModeScript'), '桥接层必须提供画布模式脚本');
+  assert.ok(manifestSource.includes('node.mode = Number(payload[id])'), '画布脚本必须设置 node.mode');
 
-  // 8. 清单脚本必须带坐标、尺寸与连线。
+  // 8. 画布模式脚本：真的把 mode 写到节点上，找不到节点时明确报错。
+  const modeScript = buildNodeModeScript({ 7: 4 });
+  const modeContext = {
+    window: { __comfyMobileApp: context.window.comfyAPI.app.app },
+    TextDecoder,
+    Uint8Array,
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+    JSON,
+    Object,
+    Array,
+    Number,
+    String,
+    Math,
+    console,
+  };
+  const modeResult = await runScript(modeContext, modeScript);
+  assert.equal(modeResult.ok, true, modeResult.error);
+  assert.equal(node.mode, 4, '脚本必须把 mode 写到画布节点上');
+  assert.deepEqual(modeResult.applied, ['7']);
+  const missingModeScript = buildNodeModeScript({ 99: 2 });
+  const missingMode = await runScript(modeContext, missingModeScript);
+  assert.equal(missingMode.ok, false, '找不到节点时必须明确失败');
+  assert.ok(String(missingMode.error).includes('找不到节点'), '失败必须带上错误信息');
+
+  // 9. 清单脚本必须带坐标、尺寸与连线。
   assert.ok(manifestSource.includes('posX: readNumber'), '清单脚本必须返回节点坐标');
   assert.ok(manifestSource.includes('sizeY: readNumber'), '清单脚本必须返回节点尺寸');
   assert.ok(manifestSource.includes('const links = collectGraphLinks();'), '清单脚本必须收集连线');
   assert.ok(manifestSource.includes('originId: String(originId)'), '连线必须带 originId');
   assert.ok(manifestSource.includes('targetSlot: Number(targetSlot) || 0'), '连线必须带 targetSlot');
 
-  // 9. 真跑一遍清单脚本，确认坐标、尺寸与连线真的被产出。
+  // 10. 真跑一遍清单脚本，确认坐标、尺寸与连线真的被产出。
   const manifest = await runManifestScript();
   assert.equal(manifest.ok, true, manifest.error);
   const seedNode = manifest.nodes.find((item) => item.id === '1');
@@ -289,7 +345,7 @@ async function main() {
   assert.equal(manifest.links[0].targetId, '2');
   assert.equal(manifest.links[0].targetSlot, 0);
 
-  console.log('PASS: node panel scripts (locate/write/button/readback/focus/errors), node mode rules, manifest graph fields');
+  console.log('PASS: node panel scripts, node mode rules (workflow JSON + canvas), manifest graph fields');
 }
 
 main().catch((error) => {

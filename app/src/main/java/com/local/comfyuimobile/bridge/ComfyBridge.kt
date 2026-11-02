@@ -23,6 +23,7 @@ import com.local.comfyuimobile.data.AppLogger
 import com.local.comfyuimobile.data.PromptGraphPolicy
 import com.local.comfyuimobile.data.WorkflowPolicy
 import com.local.comfyuimobile.model.GeneratedPrompt
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.ParameterField
 import com.local.comfyuimobile.model.ParameterAction
 import com.local.comfyuimobile.model.ParameterSection
@@ -559,9 +560,20 @@ class ComfyBridge(private val activity: Activity) {
         }
     }
 
-    suspend fun buildPrompt(fields: List<ParameterField>): GeneratedPrompt {
+    suspend fun buildPrompt(
+        fields: List<ParameterField>,
+        nodeModes: Map<String, NodeMode> = emptyMap(),
+    ): GeneratedPrompt {
         awaitReady()
         evaluateImmediate(seedSupportScript)
+        if (nodeModes.isNotEmpty()) {
+            // mode 的语义由官方前端构图时解析，所以必须先落到画布上，再构图。
+            val (applied, error) = applyNodeModesInternal(nodeModes)
+            if (!applied) {
+                throw IllegalStateException(error)
+            }
+            AppLogger.info("前端桥接：已应用节点模式 ${nodeModes.size} 项")
+        }
         lastBridgePhase = "准备参数，共 ${fields.size} 项"
         AppLogger.info("前端桥接：$lastBridgePhase")
         val changedFields = ParameterSync.editable(fields)
@@ -684,6 +696,37 @@ class ComfyBridge(private val activity: Activity) {
         val root = JSONObject(response)
         if (!root.optBoolean("ok")) throw IllegalStateException(root.optString("error", "网页按钮操作失败"))
         return root.getJSONObject("workflow").toString()
+    }
+
+    /**
+     * 把节点模式（始终执行 / 静音 / 绕过）写进已加载的官方前端图。
+     *
+     * mode 是 LiteGraph 的节点模式，语义由官方前端在构图（graphToPrompt）时解析，
+     * 服务端不消费 api prompt 里的 mode 字段，所以必须落到画布节点上。
+     *
+     * App 侧工作副本 JSON 用 [NodeModePolicy.applyToWorkflowJson] 同步 nodes[].mode；
+     * 画布序列化出来的 workflow JSON 会自然带上这些 mode。
+     *
+     * @return 全部节点都设置成功时为 true；节点不存在时为 false，并在日志里给出
+     *         明确的失败原因（不会静默忽略）。
+     */
+    suspend fun applyNodeModes(modes: Map<String, NodeMode>): Boolean {
+        if (modes.isEmpty()) return true
+        awaitReady()
+        val (applied, error) = applyNodeModesInternal(modes)
+        if (!applied) {
+            AppLogger.info("节点模式应用失败：$error")
+        }
+        return applied
+    }
+
+    private suspend fun applyNodeModesInternal(modes: Map<String, NodeMode>): Pair<Boolean, String> {
+        val response = evaluate(buildNodeModeScript(modes), timeoutMillis = 30_000L)
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) {
+            return false to root.optString("error", "节点模式应用失败")
+        }
+        return true to ""
     }
 
     /**
@@ -2003,6 +2046,66 @@ class ComfyBridge(private val activity: Activity) {
 
 private fun JSONObject.optNullableDouble(name: String): Double? =
     if (has(name) && !isNull(name)) optDouble(name) else null
+
+/**
+ * 生成「把节点模式写到画布节点上」的注入脚本。
+ *
+ * mode 是 LiteGraph 的节点模式（0 始终执行 / 2 静音 / 4 绕过），官方前端在构图
+ * （graphToPrompt）时解析它；服务端不消费 api prompt 里的 mode 字段。
+ * 脚本对找不到的节点会明确报错，不会静默忽略。
+ */
+internal fun buildNodeModeScript(modes: Map<String, NodeMode>): String {
+    val payload = JSONObject()
+    modes.forEach { (nodeId, mode) -> payload.put(nodeId, NodeModePolicy.sanitize(mode.wireValue).wireValue) }
+    val encoded = Base64.getEncoder().encodeToString(payload.toString().toByteArray(Charsets.UTF_8))
+    return """
+        (async () => {
+          try {
+            const app = window.__comfyMobileApp || (window.comfyAPI && window.comfyAPI.app && window.comfyAPI.app.app);
+            if (!app) return JSON.stringify({ok:false, error:'ComfyUI 前端对象尚未就绪'});
+            const graph = app.rootGraph || app.graph;
+            if (!graph) return JSON.stringify({ok:false, error:'ComfyUI 画布尚未就绪'});
+            const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('$encoded'), c => c.charCodeAt(0))));
+            const findNode = (id) => {
+              try {
+                if (typeof graph.getNodeById === 'function') {
+                  const byNumber = graph.getNodeById(Number(id));
+                  if (byNumber) return byNumber;
+                }
+              } catch (_) { /* 部分前端版本只接受数字 id */ }
+              try {
+                if (typeof graph.getNodeById === 'function') {
+                  const byText = graph.getNodeById(id);
+                  if (byText) return byText;
+                }
+              } catch (_) { /* 忽略，按 _nodes 兜底 */ }
+              return (graph._nodes || []).find(node => node && String(node.id) === String(id)) || null;
+            };
+            const applied = [];
+            const missing = [];
+            for (const id of Object.keys(payload)) {
+              const node = findNode(id);
+              if (!node) { missing.push(String(id)); continue; }
+              node.mode = Number(payload[id]);
+              if (typeof node.setDirtyCanvas === 'function') node.setDirtyCanvas(true, true);
+              applied.push(String(node.id));
+            }
+            if (typeof graph.setDirtyCanvas === 'function') graph.setDirtyCanvas(true, true);
+            if (missing.length) {
+              return JSON.stringify({
+                ok:false,
+                error:'找不到节点：' + missing.join(', '),
+                applied:applied,
+                missing:missing
+              });
+            }
+            return JSON.stringify({ok:true, applied:applied});
+          } catch (error) {
+            return JSON.stringify({ok:false, error:'节点模式应用失败：' + String((error && error.stack) || error)});
+          }
+        })()
+    """.trimIndent()
+}
 
 /**
  * 工作流清单 JSON 到模型的纯解析逻辑。
