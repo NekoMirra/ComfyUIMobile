@@ -6,7 +6,7 @@
 
 A native Android companion for your own ComfyUI — workflows, parameters, and original results.
 
-[![Release](https://img.shields.io/github/v/release/7116-byte/ComfyUIMobile?label=Release&color=5263CB)](https://github.com/7116-byte/ComfyUIMobile/releases/latest) [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)](#下载安装) [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](#界面预览) [![License](https://img.shields.io/github/license/7116-byte/ComfyUIMobile?color=688078)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/7116-byte/ComfyUIMobile?label=Release&color=5263CB)](https://github.com/7116-byte/ComfyUIMobile/releases/latest) [![Android](https://img.shields.io/badge/Android-13%2B-3DDC84?logo=android&logoColor=white)](#下载安装) [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](#界面预览) [![License](https://img.shields.io/github/license/7116-byte/ComfyUIMobile?color=688078)](LICENSE)
 
 [**下载 APK**](https://github.com/7116-byte/ComfyUIMobile/releases/latest) · [连接教程](docs/connection-guide.md) · [使用指南](docs/user-guide.md) · [English](README.en.md)
 
@@ -24,8 +24,27 @@ A native Android companion for your own ComfyUI — workflows, parameters, and o
 | **参数** | 提示词、种子、模型、单图与有序多图；悬浮生成操作，错误定位到部件 |
 | **结果** | 本地 / 云端分开查看，任务相册、图片缩放、原图保存、生成参数查看 |
 | **后台** | 队列、任务状态、工作站与 GPU 信息，跟踪本 App 提交或明确接管的任务 |
+| **服务器** | 服务器图片选图、服务器作品与历史生成、服务器能力探测与连接诊断 |
 
 手机使用底部导航，平板使用侧栏和分栏；深浅主题跟随系统。首次打开有可跳过的引导，之后可从连接页或设置重新查看。
+
+## 本轮新增能力
+
+发布候选分支在既有功能之上合并了三条功能分支，并完成整轮界面换肤：
+
+| 新增 | 说明 |
+| --- | --- |
+| **服务器选图** | 参数页的图片字段旁新增“服务器选图”，可直接浏览服务器上的图片库，按输入 / 输出标签筛选、按名称搜索，选中后回填字段并显示缩略预览 |
+| **作品管理** | 结果页新增“服务器”分段，内含“服务器图片”与“历史生成”两个子分段，支持按名称过滤、分页加载与任务预览 |
+| **工作流节点图** | 参数页可展开当前工作流的节点图，显示节点、连线与执行进度；点节点即可定位到对应参数 |
+| **节点绕过 / 静音** | 每个节点可切换“始终执行 / 静音 / 绕过”：静音的节点不会进入执行链，绕过的节点不执行且下游改接上游输出（语义与 ComfyUI 前端一致） |
+| **提示词库** | 常用提示词可收藏进本地提示词库，在参数页随时搜索、复用与删除 |
+| **服务器能力与诊断** | 连接页与设置页可读取并查看服务器版本、队列与显卡状态；设置页新增服务器档案管理，可重命名、置顶或删除已保存的工作站 |
+| **Glasmio 液态玻璃界面** | 界面换用 Glasmio 液态玻璃设计系统，工具栏、分段选择、胶囊标签、卡片、按钮与弹窗统一走同一套语义配色，深浅色跟随系统 |
+
+> **最低系统要求变为 Android 13（API 33）**：本轮引入的 Glasmio 0.1.1 依赖声明 `minSdkVersion=33`、`minCompileSdk=37`，App 必须与之对齐，Android 12 及更早的设备无法安装。
+>
+> 服务器选图与作品管理依赖服务器端的资源接口；服务器未启用该功能时会明确提示“服务器未启用资源功能”，其余功能不受影响。
 
 ## 界面预览
 
@@ -44,7 +63,7 @@ A native Android companion for your own ComfyUI — workflows, parameters, and o
 ## 下载安装
 
 1. 打开 [最新正式版 Release](https://github.com/7116-byte/ComfyUIMobile/releases/latest)，下载 APK。
-2. 在 Android 8.0 或以上设备安装，按系统提示允许此次安装。
+2. 在 Android 13（API 33）或以上设备安装，按系统提示允许此次安装。
 3. 已装正式版可直接覆盖更新；也可从 App 的 **设置 → 软件更新** 检查、下载和安装。
 
 Release 同时提供 APK 的 SHA-256 校验文件。正式版延续原包名与签名；独立的预览版与正式版数据互不相通。旧版检查不到更新时，请从 Release 下载覆盖，详见 [更新检查说明](docs/update-checks.md)。重要作品请另行备份，避免卸载重装。
@@ -102,6 +121,6 @@ HTTPS 实例链接请按原样粘贴，例如 `https://实例域名`；省略端
 
 ## 致谢与许可
 
-基于 [ComfyUI](https://github.com/Comfy-Org/ComfyUI) 的服务端与前端能力，使用 Kotlin、Jetpack Compose、OkHttp、Coil 和 AndroidX Media3 构建。此项目为独立客户端，与 Comfy 组织无隶属关系。
+基于 [ComfyUI](https://github.com/Comfy-Org/ComfyUI) 的服务端与前端能力，使用 Kotlin、Jetpack Compose、[Glasmio](https://github.com/NEORUAA/Glasmio) 液态玻璃组件、OkHttp、Coil 和 AndroidX Media3 构建。此项目为独立客户端，与 Comfy 组织无隶属关系。
 
 [MIT License](LICENSE) · Copyright © 2026 7116-byte

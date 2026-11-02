@@ -76,7 +76,18 @@ android {
         unitTests.isIncludeAndroidResources = true
         // Robolectric installs Conscrypt; its JDK 17 socket implementation reflects
         // InetAddress when TLS tests run after Android tests in the same worker.
-        unitTests.all { it.jvmArgs("--add-opens=java.base/java.net=ALL-UNNAMED") }
+        // The larger heap keeps Robolectric from dying with OutOfMemoryError when a
+        // whole batch of instrumented tests runs in one JVM.
+        unitTests.all {
+            it.jvmArgs("--add-opens=java.base/java.net=ALL-UNNAMED")
+            it.maxHeapSize = "4g"
+            it.maxParallelForks = 1
+            it.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showStackTraces = true
+            }
+        }
     }
 }
 

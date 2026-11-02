@@ -3,6 +3,7 @@ package com.local.comfyuimobile.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
@@ -10,6 +11,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -21,6 +23,7 @@ import io.github.neoruaa.glasmio.ui.GlasmioGroupedList
 import io.github.neoruaa.glasmio.ui.GlasmioSectionTitle
 import io.github.neoruaa.glasmio.ui.GlasmioSwitch
 import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog as GlasmioNativeAlertDialog
+import io.github.neoruaa.glasmio.ui.GlasmioAlertSurface as GlasmioNativeAlertSurface
 import io.github.neoruaa.glasmio.ui.GlasmioListRow as GlasmioNativeListRow
 
 /**
@@ -148,6 +151,39 @@ fun GlasmioAlertDialog(
             ),
         ),
     )
+}
+
+/**
+ * Alert surface rendered inline in the current window instead of in a separate dialog window.
+ *
+ * A dialog or a bottom sheet lives in its own window, so the page backdrop is not sampled by the
+ * alert. Inlining the alert keeps the content in the same window, where the glass material has a
+ * backdrop to sample. Use it for confirmations that belong to a page.
+ */
+@Composable
+fun GlasmioInlineAlert(
+    modifier: Modifier = Modifier,
+    title: String,
+    message: String? = null,
+    confirmText: String = "确定",
+    dismissText: String = "取消",
+    onConfirm: () -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    GlasmioNativeAlertSurface(
+        modifier = modifier,
+        title = title,
+        message = message,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlasmioSecondaryButton(onClick = onDismissRequest, text = dismissText)
+            GlasmioPrimaryButton(onClick = onConfirm, text = confirmText)
+        }
+    }
 }
 
 /**

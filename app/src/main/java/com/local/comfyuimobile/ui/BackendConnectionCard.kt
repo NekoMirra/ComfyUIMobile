@@ -6,20 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,82 +40,111 @@ internal fun BackendConnectionCard(
     var details by rememberSaveable { mutableStateOf(false) }
     val online = state.status == ConnectionStatus.CONNECTED && state.bridgeReady
     val badges = backendCapabilityBadges(state, capabilities)
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    val colors = glasmioColors()
+    val appColors = glasmioAppColors()
+    GlasmioCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(state.activeServer?.name.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                StudioBadge(backendConnectionLabel(state), color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                Text(
+                    state.activeServer?.name.orEmpty(),
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.content,
+                )
+                GlasmioBadge(
+                    backendConnectionLabel(state),
+                    color = if (online) appColors.success else appColors.danger,
+                )
             }
             SelectionContainer {
-                Text(state.activeServer?.baseUrl.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    state.activeServer?.baseUrl.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryContent,
+                )
             }
             if (badges.isNotEmpty()) {
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    badges.forEach { badge -> StudioBadge(badge) }
+                    badges.forEach { badge -> GlasmioBadge(badge) }
                 }
             }
             if (!online && state.connectionMessage.isNotBlank()) {
-                Text(state.connectionMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text(
+                    state.connectionMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = appColors.danger,
+                )
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { details = !details }) {
-                    Text(if (details) "收起服务器信息" else "服务器信息")
-                    Icon(if (details) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, Modifier.size(18.dp))
-                }
-                TextButton(onClick = onReconnect, enabled = state.status != ConnectionStatus.CONNECTING) {
-                    Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
-                    Text("重连", maxLines = 1)
-                }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlasmioSecondaryButton(
+                    onClick = { details = !details },
+                    modifier = Modifier.weight(1f),
+                    text = if (details) "收起服务器信息" else "服务器信息",
+                )
+                GlasmioPrimaryButton(
+                    onClick = onReconnect,
+                    modifier = Modifier.weight(1f),
+                    enabled = state.status != ConnectionStatus.CONNECTING,
+                    text = "重连",
+                )
             }
             if (details) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(color = colors.separator)
                 val stats = state.systemStats
                 val comfyVersion = capabilities?.comfyVersion?.takeIf { it.isNotBlank() }
                     ?: stats?.comfyVersion?.takeIf { it.isNotBlank() }
-                Text("ComfyUI ${comfyVersion ?: "版本未知"}", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "ComfyUI ${comfyVersion ?: "版本未知"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.content,
+                )
                 val frontendVersion = capabilities?.frontendVersion?.takeIf { it.isNotBlank() }
                     ?: stats?.frontendVersion?.takeIf { it.isNotBlank() }
                 frontendVersion?.let {
-                    Text("前端 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
                 }
                 if (capabilities != null) {
                     Text(
                         "Python ${capabilities.pythonVersion.ifBlank { "未知" }} · PyTorch ${capabilities.pytorchVersion.ifBlank { "未知" }}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = colors.secondaryContent,
                     )
                     if (capabilities.ramTotal > 0L) {
                         Text(
                             "内存可用 ${formatCapacityBytes(capabilities.ramFree)} / ${formatCapacityBytes(capabilities.ramTotal)}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = colors.secondaryContent,
                         )
                     }
                 }
                 val capabilityDevice = capabilities?.takeIf { it.deviceName.isNotBlank() }
                 if (capabilityDevice != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(capabilityDevice.deviceName, style = MaterialTheme.typography.bodySmall)
+                        Text(capabilityDevice.deviceName, style = MaterialTheme.typography.bodySmall, color = colors.content)
                         if (capabilityDevice.vramTotal > 0L) {
                             Text(
                                 "显存可用 ${formatCapacityBytes(capabilityDevice.vramFree)} / ${formatCapacityBytes(capabilityDevice.vramTotal)}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = colors.secondaryContent,
                             )
                         }
                     }
                 } else {
                     stats?.devices?.forEach { device ->
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(device.name, style = MaterialTheme.typography.bodySmall)
+                            Text(device.name, style = MaterialTheme.typography.bodySmall, color = colors.content)
                             if (device.vramTotal > 0L) {
                                 Text(
                                     "显存可用 ${formatCapacityBytes(device.vramFree)} / ${formatCapacityBytes(device.vramTotal)}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = colors.secondaryContent,
                                 )
                             }
                         }
@@ -132,7 +152,7 @@ internal fun BackendConnectionCard(
                 }
                 val queueText = capabilities?.let { "服务器队列：运行中 ${it.queueRunningCount} · 等待中 ${it.queuePendingCount}" }
                     ?: "服务器等待队列：${state.queueRemaining}"
-                Text(queueText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(queueText, style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
             }
         }
     }

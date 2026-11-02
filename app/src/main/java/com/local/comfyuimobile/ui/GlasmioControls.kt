@@ -2,6 +2,7 @@ package com.local.comfyuimobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +34,8 @@ import io.github.neoruaa.glasmio.ui.GlasmioIconButton
 import io.github.neoruaa.glasmio.ui.GlasmioSegmentedControl
 import io.github.neoruaa.glasmio.ui.GlasmioTextField
 import io.github.neoruaa.glasmio.ui.GlasmioTopBar
+import io.github.neoruaa.glasmio.ui.GlasmioCard as GlasmioNativeCard
+import io.github.neoruaa.glasmio.ui.GlasmioListValuePill as GlasmioNativeValuePill
 
 /**
  * Installs the Glasmio icon resolver for the whole subtree.
@@ -107,6 +110,42 @@ fun GlasmioIconAction(
             tint = tint,
         )
     }
+}
+
+/**
+ * Glass card. Mirrors the Material3 `Card` call shape.
+ *
+ * A card is a glass surface, so it must live inside the Glasmio backdrop host.
+ */
+@Composable
+fun GlasmioCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    GlasmioNativeCard(
+        modifier = modifier,
+        onClick = onClick,
+        content = content,
+    )
+}
+
+/**
+ * Value pill shown at the trailing edge of a list row. Mirrors the Material3 `AssistChip` shape.
+ */
+@Composable
+fun GlasmioValuePill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    GlasmioNativeValuePill(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+    )
 }
 
 /**
