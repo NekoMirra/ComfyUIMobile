@@ -23,10 +23,12 @@ import com.local.comfyuimobile.data.AppLogger
 import com.local.comfyuimobile.data.PromptGraphPolicy
 import com.local.comfyuimobile.data.WorkflowPolicy
 import com.local.comfyuimobile.model.GeneratedPrompt
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.ParameterField
 import com.local.comfyuimobile.model.ParameterAction
 import com.local.comfyuimobile.model.ParameterSection
 import com.local.comfyuimobile.model.WorkflowConnectionMarker
+import com.local.comfyuimobile.model.WorkflowLink
 import com.local.comfyuimobile.model.WorkflowManifest
 import com.local.comfyuimobile.model.WorkflowNode
 import com.local.comfyuimobile.network.LanAddress
@@ -496,7 +498,7 @@ class ComfyBridge(private val activity: Activity) {
         })()
     """.trimIndent()
 
-    private fun parseWorkflowManifest(rawJson: String, response: String): WorkflowManifest {
+    internal fun parseWorkflowManifest(rawJson: String, response: String): WorkflowManifest {
         val root = JSONObject(response)
         if (!root.optBoolean("ok")) throw IllegalStateException(root.optString("error", "工作流解析失败"))
         root.optJSONObject("diagnostics")
@@ -529,121 +531,7 @@ class ComfyBridge(private val activity: Activity) {
                     repairMode = diagnostics.optString("linkRepairMode", "none"),
                 )
             }
-        val layout = parseLayout(rawJson)
-        val fieldsJson = root.optJSONArray("fields") ?: JSONArray()
-        val fields = buildList {
-            repeat(fieldsJson.length()) { index ->
-                val item = fieldsJson.getJSONObject(index)
-                val key = item.getString("key")
-                val optionsJson = item.optJSONArray("values") ?: JSONArray()
-                val options = List(optionsJson.length()) { optionsJson.optString(it) }
-                val value = item.opt("value")
-                val nodeType = item.optString("nodeType")
-                val name = item.optString("name")
-                val widgetType = item.optString("widgetType")
-                val minimum = item.optNullableDouble("min")
-                val maximum = item.optNullableDouble("max")
-                val step = item.optNullableDouble("step")
-                val kind = ParameterClassifier.kind(
-                    nodeType = nodeType,
-                    name = name,
-                    widgetType = widgetType,
-                    value = value,
-                    options = options,
-                    dataType = item.optString("dataType"),
-                    minimum = minimum,
-                    maximum = maximum,
-                    step = step,
-                    precision = item.optInt("precision", -1).takeIf { it >= 0 },
-                    imageListUpload = item.optBoolean("imageListUpload"),
-                    multiline = item.optBoolean("multiline"),
-                )
-                val stored = layout.optJSONObject(key)
-                val label = stored?.optString("label").takeUnless { it.isNullOrBlank() }
-                    ?: ParameterClassifier.label(item.optString("nodeTitle"), name, item.optString("label", name))
-                val section = when (stored?.optString("section")) {
-                    "primary" -> ParameterSection.PRIMARY
-                    "more" -> ParameterSection.MORE
-                    else -> if (item.optBoolean("refreshesWorkflow")) {
-                        ParameterSection.PRIMARY
-                    } else {
-                        ParameterClassifier.section(nodeType, name, kind)
-                    }
-                }
-                val valueJson = when (value) {
-                    null, JSONObject.NULL -> "null"
-                    is String -> JSONObject.quote(value)
-                    else -> value.toString()
-                }
-                add(
-                    ParameterField(
-                        key = key,
-                        nodeId = item.optString("nodeId"),
-                        nodeTitle = item.optString("nodeTitle"),
-                        nodeType = nodeType,
-                        name = name,
-                        label = label,
-                        widgetType = widgetType,
-                        kind = kind,
-                        valueJson = valueJson,
-                        displayValue = when (value) {
-                            null, JSONObject.NULL -> ""
-                            else -> value.toString()
-                        },
-                        options = options,
-                        minimum = minimum,
-                        maximum = maximum,
-                        step = step,
-                        linked = item.optBoolean("linked"),
-                        visible = stored?.optBoolean("visible", true) ?: true,
-                        section = section,
-                        order = stored?.optInt("order", index) ?: index,
-                        warning = if (kind.name == "UNSUPPORTED") "此控件需在高级编辑中修改" else null,
-                        widgetIndex = item.optInt("widgetIndex", -1),
-                        refreshesWorkflow = item.optBoolean("refreshesWorkflow"),
-                        nodeOrder = item.optInt("nodeOrder"),
-                        actions = item.optJSONArray("actions")?.let { actions ->
-                            List(actions.length()) { actionIndex ->
-                                val action = actions.getJSONObject(actionIndex)
-                                ParameterAction(action.getString("label"), action.toString(), action.optBoolean("enabled", true))
-                            }
-                        } ?: emptyList(),
-                    ),
-                )
-            }
-        }.sortedWith(compareBy<ParameterField> { it.nodeOrder }.thenBy { it.order })
-        val nodesJson = root.optJSONArray("nodes") ?: JSONArray()
-        val nodes = buildList {
-            repeat(nodesJson.length()) { index ->
-                val item = nodesJson.getJSONObject(index)
-                add(
-                    WorkflowNode(
-                        id = item.getString("id"),
-                        title = item.optString("title").ifBlank { item.optString("type", "未命名节点") },
-                        type = item.optString("type"),
-                        order = item.optInt("order", index),
-                        isController = item.optBoolean("isController"),
-                        isOutput = item.optBoolean("isOutput"),
-                        inputMarkers = parseConnectionMarkers(item.optJSONArray("inputMarkers")),
-                        outputMarkers = parseConnectionMarkers(item.optJSONArray("outputMarkers")),
-                    ),
-                )
-            }
-        }.sortedBy { it.order }
-        return WorkflowManifest(fields, nodes)
-    }
-
-    private fun parseConnectionMarkers(array: JSONArray?): List<WorkflowConnectionMarker> {
-        if (array == null) return emptyList()
-        return List(array.length()) { index ->
-            val item = array.getJSONObject(index)
-            WorkflowConnectionMarker(
-                label = item.optString("label"),
-                type = item.optString("type"),
-                color = item.optString("color"),
-                portName = item.optString("portName"),
-            )
-        }
+        return WorkflowManifestParser.parse(rawJson, response)
     }
 
     suspend fun extractWorkflowFromImage(uri: Uri, mimeType: String?, filename: String): String {
@@ -672,9 +560,20 @@ class ComfyBridge(private val activity: Activity) {
         }
     }
 
-    suspend fun buildPrompt(fields: List<ParameterField>): GeneratedPrompt {
+    suspend fun buildPrompt(
+        fields: List<ParameterField>,
+        nodeModes: Map<String, NodeMode> = emptyMap(),
+    ): GeneratedPrompt {
         awaitReady()
         evaluateImmediate(seedSupportScript)
+        if (nodeModes.isNotEmpty()) {
+            // mode 的语义由官方前端构图时解析，所以必须先落到画布上，再构图。
+            val (applied, error) = applyNodeModesInternal(nodeModes)
+            if (!applied) {
+                throw IllegalStateException(error)
+            }
+            AppLogger.info("前端桥接：已应用节点模式 ${nodeModes.size} 项")
+        }
         lastBridgePhase = "准备参数，共 ${fields.size} 项"
         AppLogger.info("前端桥接：$lastBridgePhase")
         val changedFields = ParameterSync.editable(fields)
@@ -797,6 +696,107 @@ class ComfyBridge(private val activity: Activity) {
         val root = JSONObject(response)
         if (!root.optBoolean("ok")) throw IllegalStateException(root.optString("error", "网页按钮操作失败"))
         return root.getJSONObject("workflow").toString()
+    }
+
+    /**
+     * 把节点模式（始终执行 / 静音 / 绕过）写进已加载的官方前端图。
+     *
+     * mode 是 LiteGraph 的节点模式，语义由官方前端在构图（graphToPrompt）时解析，
+     * 服务端不消费 api prompt 里的 mode 字段，所以必须落到画布节点上。
+     *
+     * App 侧工作副本 JSON 用 [NodeModePolicy.applyToWorkflowJson] 同步 nodes[].mode；
+     * 画布序列化出来的 workflow JSON 会自然带上这些 mode。
+     *
+     * @return 全部节点都设置成功时为 true；节点不存在时为 false，并在日志里给出
+     *         明确的失败原因（不会静默忽略）。
+     */
+    suspend fun applyNodeModes(modes: Map<String, NodeMode>): Boolean {
+        if (modes.isEmpty()) return true
+        awaitReady()
+        val (applied, error) = applyNodeModesInternal(modes)
+        if (!applied) {
+            AppLogger.info("节点模式应用失败：$error")
+        }
+        return applied
+    }
+
+    private suspend fun applyNodeModesInternal(modes: Map<String, NodeMode>): Pair<Boolean, String> {
+        val response = evaluate(buildNodeModeScript(modes), timeoutMillis = 30_000L)
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) {
+            return false to root.optString("error", "节点模式应用失败")
+        }
+        return true to ""
+    }
+
+    /**
+     * 打开节点自带的面板（插件面板）。
+     *
+     * 面板由插件在官方前端里绘制，App 只负责把该节点在官方前端里定位出来、
+     * 写入 [initialValues]、点开 [widgetName] 对应的按钮；插件面板会直接显示在
+     * 官方前端的 WebView 上。
+     *
+     * @return 成功时 ok 为 true，changed 是面板已经改动过的 widget 值；
+     *         失败时 ok 为 false，error 给出明确原因。
+     */
+    suspend fun openNodePanel(
+        nodeId: String,
+        widgetName: String?,
+        initialValues: Map<String, String>,
+    ): NodePanelOpenResult {
+        awaitReady()
+        val script = NodePanelBridge.buildOpenPanelScript(nodeId, widgetName, initialValues)
+        val response = evaluate(script, timeoutMillis = 30_000L)
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) {
+            val error = root.optString("error", "打开节点面板失败")
+            AppLogger.info("节点面板打开失败：$error")
+            return NodePanelOpenResult(ok = false, error = error)
+        }
+        return NodePanelOpenResult(
+            ok = true,
+            changed = readStringMap(root.optJSONObject("changed")),
+        )
+    }
+
+    /**
+     * 读回该节点所有可提交 widget 的当前值，与打开面板时的基线比较后
+     * 只返回面板真正改动过的参数。
+     */
+    suspend fun readNodePanelValues(nodeId: String): Map<String, String> {
+        awaitReady()
+        val response = evaluate(NodePanelBridge.buildReadValuesScript(nodeId), timeoutMillis = 30_000L)
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) {
+            throw IllegalStateException(root.optString("error", "读取节点面板参数失败"))
+        }
+        return readStringMap(root.optJSONObject("changed"))
+    }
+
+    /** 把官方前端的画布平移到该节点，用于节点图点击后的定位。 */
+    suspend fun focusNode(nodeId: String): Boolean {
+        awaitReady()
+        val response = evaluate(NodePanelBridge.buildFocusNodeScript(nodeId), timeoutMillis = 30_000L)
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) {
+            AppLogger.info("节点定位失败：${root.optString("error", "未知原因")}")
+            return false
+        }
+        return root.optBoolean("focused", false)
+    }
+
+    private fun readStringMap(source: JSONObject?): Map<String, String> {
+        if (source == null) return emptyMap()
+        val result = LinkedHashMap<String, String>()
+        source.keys().forEach { key ->
+            val value = source.opt(key)
+            result[key] = when (value) {
+                null, JSONObject.NULL -> ""
+                is String -> value
+                else -> value.toString()
+            }
+        }
+        return result
     }
 
     fun destroy() {
@@ -1003,18 +1003,9 @@ class ComfyBridge(private val activity: Activity) {
         return JSONArray("[$value]").getString(0)
     }
 
-    private fun parseLayout(rawJson: String): JSONObject = runCatching {
-        JSONObject(rawJson).optJSONObject("extra")
-            ?.optJSONObject("comfyMobile")
-            ?.optJSONObject("fields") ?: JSONObject()
-    }.getOrDefault(JSONObject())
-
     private fun parseJsonValue(raw: String): Any = runCatching {
         JSONObject("{\"v\":$raw}").get("v")
     }.getOrElse { raw }
-
-    private fun JSONObject.optNullableDouble(name: String): Double? =
-        if (has(name) && !isNull(name)) optDouble(name) else null
 
     private fun imageWorkflowScript(token: String, encodedFilename: String, mimeType: String) = """
         (async () => {
@@ -1569,6 +1560,16 @@ class ComfyBridge(private val activity: Activity) {
                   ...(nodeData.input?.optional || {}),
                   ...(nodeData.input?.hidden || {}),
                 };
+                const nodePos = Array.isArray(node.pos)
+                  ? node.pos
+                  : (node.pos && typeof node.pos === 'object' ? [node.pos.x, node.pos.y] : null);
+                const nodeSize = Array.isArray(node.size)
+                  ? node.size
+                  : (node.size && typeof node.size === 'object' ? [node.size.x, node.size.y] : null);
+                const readNumber = (value) => {
+                  const number = Number(value);
+                  return Number.isFinite(number) ? number : 0;
+                };
                 nodes.push({
                   id: nodeKey,
                   title: node.title || node.type || '',
@@ -1578,6 +1579,10 @@ class ComfyBridge(private val activity: Activity) {
                   isOutput: isOutputNode(node),
                   inputMarkers: inputMarkersByNode.get(nodeKey) || [],
                   outputMarkers: outputMarkersByNode.get(nodeKey) || [],
+                  posX: readNumber(nodePos ? nodePos[0] : 0),
+                  posY: readNumber(nodePos ? nodePos[1] : 0),
+                  sizeX: readNumber(nodeSize ? nodeSize[0] : 0),
+                  sizeY: readNumber(nodeSize ? nodeSize[1] : 0),
                 });
                 const widgets = node.widgets || [];
                 const nameCounts = new Map();
@@ -1628,10 +1633,70 @@ class ComfyBridge(private val activity: Activity) {
                   });
                 }
             }
+            const collectGraphLinks = () => {
+              const out = [];
+              const seen = new Set();
+              const pushLink = (linkId, originId, originSlot, targetId, targetSlot) => {
+                if (originId == null || targetId == null) return;
+                const id = String(linkId == null ? '' : linkId);
+                const key = id + '|' + String(originId) + '|' + String(originSlot)
+                  + '|' + String(targetId) + '|' + String(targetSlot);
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push({
+                  linkId: id,
+                  originId: String(originId),
+                  originSlot: Number(originSlot) || 0,
+                  targetId: String(targetId),
+                  targetSlot: Number(targetSlot) || 0
+                });
+              };
+              const readLink = (linkId, link) => {
+                if (link == null) return;
+                if (Array.isArray(link)) {
+                  pushLink(link[0] != null ? link[0] : linkId, link[1], link[2], link[3], link[4]);
+                  return;
+                }
+                const originId = link.origin_id != null
+                  ? link.origin_id
+                  : (link.originId != null ? link.originId : link[1]);
+                const originSlot = link.origin_slot != null
+                  ? link.origin_slot
+                  : (link.originSlot != null ? link.originSlot : link[2]);
+                const targetId = link.target_id != null
+                  ? link.target_id
+                  : (link.targetId != null ? link.targetId : link[3]);
+                const targetSlot = link.target_slot != null
+                  ? link.target_slot
+                  : (link.targetSlot != null ? link.targetSlot : link[4]);
+                pushLink(link.id != null ? link.id : linkId, originId, originSlot, targetId, targetSlot);
+              };
+              const graphLinks = rootGraph
+                ? (rootGraph.links != null ? rootGraph.links : rootGraph._links)
+                : null;
+              if (graphLinks instanceof Map) {
+                graphLinks.forEach((value, key) => readLink(key, value));
+              } else if (graphLinks && typeof graphLinks === 'object') {
+                for (const key of Object.keys(graphLinks)) readLink(key, graphLinks[key]);
+              }
+              if (!out.length) {
+                const workflowLinks = sourceWorkflow && sourceWorkflow.links != null
+                  ? sourceWorkflow.links
+                  : (workflow ? workflow.links : null);
+                if (Array.isArray(workflowLinks)) {
+                  for (const link of workflowLinks) readLink(link ? link[0] : null, link);
+                } else if (workflowLinks && typeof workflowLinks === 'object') {
+                  for (const key of Object.keys(workflowLinks)) readLink(key, workflowLinks[key]);
+                }
+              }
+              return out;
+            };
+            const links = collectGraphLinks();
             return JSON.stringify({
               ok:true,
               fields,
               nodes,
+              links,
               diagnostics:{
                 nativeWorkflowOpen:$nativeWorkflowOpen,
                 sourceLinkCount,
@@ -1976,5 +2041,227 @@ class ComfyBridge(private val activity: Activity) {
               }
             })()
         """.trimIndent()
+    }
+}
+
+private fun JSONObject.optNullableDouble(name: String): Double? =
+    if (has(name) && !isNull(name)) optDouble(name) else null
+
+/**
+ * 生成「把节点模式写到画布节点上」的注入脚本。
+ *
+ * mode 是 LiteGraph 的节点模式（0 始终执行 / 2 静音 / 4 绕过），官方前端在构图
+ * （graphToPrompt）时解析它；服务端不消费 api prompt 里的 mode 字段。
+ * 脚本对找不到的节点会明确报错，不会静默忽略。
+ */
+internal fun buildNodeModeScript(modes: Map<String, NodeMode>): String {
+    val payload = JSONObject()
+    modes.forEach { (nodeId, mode) -> payload.put(nodeId, NodeModePolicy.sanitize(mode.wireValue).wireValue) }
+    val encoded = Base64.getEncoder().encodeToString(payload.toString().toByteArray(Charsets.UTF_8))
+    return """
+        (async () => {
+          try {
+            const app = window.__comfyMobileApp || (window.comfyAPI && window.comfyAPI.app && window.comfyAPI.app.app);
+            if (!app) return JSON.stringify({ok:false, error:'ComfyUI 前端对象尚未就绪'});
+            const graph = app.rootGraph || app.graph;
+            if (!graph) return JSON.stringify({ok:false, error:'ComfyUI 画布尚未就绪'});
+            const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('$encoded'), c => c.charCodeAt(0))));
+            const findNode = (id) => {
+              try {
+                if (typeof graph.getNodeById === 'function') {
+                  const byNumber = graph.getNodeById(Number(id));
+                  if (byNumber) return byNumber;
+                }
+              } catch (_) { /* 部分前端版本只接受数字 id */ }
+              try {
+                if (typeof graph.getNodeById === 'function') {
+                  const byText = graph.getNodeById(id);
+                  if (byText) return byText;
+                }
+              } catch (_) { /* 忽略，按 _nodes 兜底 */ }
+              return (graph._nodes || []).find(node => node && String(node.id) === String(id)) || null;
+            };
+            const applied = [];
+            const missing = [];
+            for (const id of Object.keys(payload)) {
+              const node = findNode(id);
+              if (!node) { missing.push(String(id)); continue; }
+              node.mode = Number(payload[id]);
+              if (typeof node.setDirtyCanvas === 'function') node.setDirtyCanvas(true, true);
+              applied.push(String(node.id));
+            }
+            if (typeof graph.setDirtyCanvas === 'function') graph.setDirtyCanvas(true, true);
+            if (missing.length) {
+              return JSON.stringify({
+                ok:false,
+                error:'找不到节点：' + missing.join(', '),
+                applied:applied,
+                missing:missing
+              });
+            }
+            return JSON.stringify({ok:true, applied:applied});
+          } catch (error) {
+            return JSON.stringify({ok:false, error:'节点模式应用失败：' + String((error && error.stack) || error)});
+          }
+        })()
+    """.trimIndent()
+}
+
+/**
+ * 工作流清单 JSON 到模型的纯解析逻辑。
+ *
+ * 页面诊断（例如连线重绘报告）仍由 [ComfyBridge] 自己记录，这里只负责把
+ * 前端返回的 JSON 变成字段、节点与连线，因此可以在纯 JVM 单元测试里直接验证
+ * 节点坐标、尺寸与连线等结构。
+ */
+internal object WorkflowManifestParser {
+    fun parse(rawJson: String, response: String): WorkflowManifest {
+        val root = JSONObject(response)
+        if (!root.optBoolean("ok")) throw IllegalStateException(root.optString("error", "工作流解析失败"))
+        val layout = parseLayout(rawJson)
+        val fieldsJson = root.optJSONArray("fields") ?: JSONArray()
+        val fields = buildList {
+            repeat(fieldsJson.length()) { index ->
+                val item = fieldsJson.getJSONObject(index)
+                val key = item.getString("key")
+                val optionsJson = item.optJSONArray("values") ?: JSONArray()
+                val options = List(optionsJson.length()) { optionsJson.optString(it) }
+                val value = item.opt("value")
+                val nodeType = item.optString("nodeType")
+                val name = item.optString("name")
+                val widgetType = item.optString("widgetType")
+                val minimum = item.optNullableDouble("min")
+                val maximum = item.optNullableDouble("max")
+                val step = item.optNullableDouble("step")
+                val kind = ParameterClassifier.kind(
+                    nodeType = nodeType,
+                    name = name,
+                    widgetType = widgetType,
+                    value = value,
+                    options = options,
+                    dataType = item.optString("dataType"),
+                    minimum = minimum,
+                    maximum = maximum,
+                    step = step,
+                    precision = item.optInt("precision", -1).takeIf { it >= 0 },
+                    imageListUpload = item.optBoolean("imageListUpload"),
+                    multiline = item.optBoolean("multiline"),
+                )
+                val stored = layout.optJSONObject(key)
+                val label = stored?.optString("label").takeUnless { it.isNullOrBlank() }
+                    ?: ParameterClassifier.label(item.optString("nodeTitle"), name, item.optString("label", name))
+                val section = when (stored?.optString("section")) {
+                    "primary" -> ParameterSection.PRIMARY
+                    "more" -> ParameterSection.MORE
+                    else -> if (item.optBoolean("refreshesWorkflow")) {
+                        ParameterSection.PRIMARY
+                    } else {
+                        ParameterClassifier.section(nodeType, name, kind)
+                    }
+                }
+                val valueJson = when (value) {
+                    null, JSONObject.NULL -> "null"
+                    is String -> JSONObject.quote(value)
+                    else -> value.toString()
+                }
+                add(
+                    ParameterField(
+                        key = key,
+                        nodeId = item.optString("nodeId"),
+                        nodeTitle = item.optString("nodeTitle"),
+                        nodeType = nodeType,
+                        name = name,
+                        label = label,
+                        widgetType = widgetType,
+                        kind = kind,
+                        valueJson = valueJson,
+                        displayValue = when (value) {
+                            null, JSONObject.NULL -> ""
+                            else -> value.toString()
+                        },
+                        options = options,
+                        minimum = minimum,
+                        maximum = maximum,
+                        step = step,
+                        linked = item.optBoolean("linked"),
+                        visible = stored?.optBoolean("visible", true) ?: true,
+                        section = section,
+                        order = stored?.optInt("order", index) ?: index,
+                        warning = if (kind.name == "UNSUPPORTED") "此控件需在高级编辑中修改" else null,
+                        widgetIndex = item.optInt("widgetIndex", -1),
+                        refreshesWorkflow = item.optBoolean("refreshesWorkflow"),
+                        nodeOrder = item.optInt("nodeOrder"),
+                        actions = item.optJSONArray("actions")?.let { actions ->
+                            List(actions.length()) { actionIndex ->
+                                val action = actions.getJSONObject(actionIndex)
+                                ParameterAction(action.getString("label"), action.toString(), action.optBoolean("enabled", true))
+                            }
+                        } ?: emptyList(),
+                    ),
+                )
+            }
+        }.sortedWith(compareBy<ParameterField> { it.nodeOrder }.thenBy { it.order })
+        val nodesJson = root.optJSONArray("nodes") ?: JSONArray()
+        val nodes = buildList {
+            repeat(nodesJson.length()) { index ->
+                val item = nodesJson.getJSONObject(index)
+                add(
+                    WorkflowNode(
+                        id = item.getString("id"),
+                        title = item.optString("title").ifBlank { item.optString("type", "未命名节点") },
+                        type = item.optString("type"),
+                        order = item.optInt("order", index),
+                        isController = item.optBoolean("isController"),
+                        isOutput = item.optBoolean("isOutput"),
+                        inputMarkers = parseConnectionMarkers(item.optJSONArray("inputMarkers")),
+                        outputMarkers = parseConnectionMarkers(item.optJSONArray("outputMarkers")),
+                        posX = optFloat(item, "posX"),
+                        posY = optFloat(item, "posY"),
+                        sizeX = optFloat(item, "sizeX"),
+                        sizeY = optFloat(item, "sizeY"),
+                    ),
+                )
+            }
+        }.sortedBy { it.order }
+        val linksJson = root.optJSONArray("links") ?: JSONArray()
+        val links = buildList {
+            repeat(linksJson.length()) { index ->
+                val item = linksJson.getJSONObject(index)
+                add(
+                    WorkflowLink(
+                        linkId = item.optString("linkId"),
+                        originId = item.optString("originId"),
+                        originSlot = item.optInt("originSlot", 0),
+                        targetId = item.optString("targetId"),
+                        targetSlot = item.optInt("targetSlot", 0),
+                    ),
+                )
+            }
+        }
+        return WorkflowManifest(fields, nodes, links)
+    }
+
+    private fun optFloat(item: JSONObject, key: String): Float {
+        val value = item.optDouble(key, 0.0)
+        return if (value.isNaN()) 0f else value.toFloat()
+    }
+
+    private fun parseLayout(rawJson: String): JSONObject = runCatching {
+        JSONObject(rawJson).optJSONObject("extra")
+            ?.optJSONObject("comfyMobile")
+            ?.optJSONObject("fields") ?: JSONObject()
+    }.getOrElse { JSONObject() }
+
+    private fun parseConnectionMarkers(array: JSONArray?): List<WorkflowConnectionMarker> {
+        if (array == null) return emptyList()
+        return List(array.length()) { index ->
+            val item = array.getJSONObject(index)
+            WorkflowConnectionMarker(
+                label = item.optString("label"),
+                type = item.optString("type"),
+                color = item.optString("color"),
+                portName = item.optString("portName"),
+            )
+        }
     }
 }
