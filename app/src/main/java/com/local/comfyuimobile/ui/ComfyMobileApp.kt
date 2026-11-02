@@ -16,6 +16,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -114,7 +115,7 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
@@ -180,6 +181,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import io.github.neoruaa.glasmio.core.GlasmioTheme
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
@@ -302,7 +304,7 @@ fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
                     factory = { context ->
                         FrameLayout(context).apply {
                             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDENTS
+                            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                             addView(bridge.webView.apply {
                                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                                 isFocusable = false
@@ -496,6 +498,8 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     }
     Scaffold(
         modifier = Modifier.imePadding(),
+        // Transparent so the Glasmio backdrop painted by the shell stays visible.
+        containerColor = Color.Transparent,
         topBar = {
             toolbar(Modifier.windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top)))
         },
@@ -503,7 +507,7 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
             if (!expanded && !imeVisible) {
                 // The bar floats above the page, so it uses a plain tinted surface instead of glass:
                 // a glass panel here would sample the whole screen instead of the page backdrop.
-                MaterialTheme(shapes = MaterialTheme.shapes.copy(extraLarge = glasmioShapes().extraLarge)) {
+                MaterialTheme(shapes = GlasmioTheme.shapes.materialShapes()) {
                     NavigationBar(containerColor = glasmioColors().elevatedBackground) {
                         MainPage.entries.forEach { target ->
                             NavigationBarItem(
@@ -528,7 +532,7 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
             if (expanded) {
-                MaterialTheme(shapes = MaterialTheme.shapes.copy(extraLarge = glasmioShapes().extraLarge)) {
+                MaterialTheme(shapes = GlasmioTheme.shapes.materialShapes()) {
                     NavigationRail(containerColor = glasmioColors().groupedBackground, modifier = Modifier.fillMaxHeight()) {
                         Spacer(Modifier.height(16.dp))
                         MainPage.entries.forEach { target ->
@@ -2169,21 +2173,23 @@ private fun ResultMediaGrid(
                     onLongClick = { onToggleSelection(item) },
                 ),
             ) {
-                Box(Modifier.fillMaxWidth()) {
-                    MediaCover(item, Modifier.fillMaxWidth().aspectRatio(1f))
-                    if (selected) {
-                        Box(
-                            Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = 0.22f)),
-                        )
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            "已选择",
-                            Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp),
-                            tint = glasmioColors().accent,
-                        )
+                Column(Modifier.fillMaxWidth()) {
+                    Box(Modifier.fillMaxWidth()) {
+                        MediaCover(item, Modifier.fillMaxWidth().aspectRatio(1f))
+                        if (selected) {
+                            Box(
+                                Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = 0.22f)),
+                            )
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                "已选择",
+                                Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp),
+                                tint = glasmioColors().accent,
+                            )
+                        }
                     }
+                    Text(item.filename, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
                 }
-                Text(item.filename, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -2206,30 +2212,32 @@ private fun AlbumTile(
             onLongClick = onToggleSelection,
         ),
     ) {
-        Box(Modifier.fillMaxWidth()) {
-            MediaCover(cover, Modifier.fillMaxWidth().aspectRatio(1.33f))
-            if (selected || partiallySelected) {
-                Box(
-                    Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = if (selected) 0.24f else 0.12f)),
-                )
-                Icon(
-                    Icons.Default.CheckCircle,
-                    if (selected) "已选择整个相册" else "已选择部分作品",
-                    Modifier.align(Alignment.TopEnd).padding(7.dp).size(28.dp),
-                    tint = glasmioColors().accent,
-                )
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth()) {
+                MediaCover(cover, Modifier.fillMaxWidth().aspectRatio(1.33f))
+                if (selected || partiallySelected) {
+                    Box(
+                        Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = if (selected) 0.24f else 0.12f)),
+                    )
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        if (selected) "已选择整个相册" else "已选择部分作品",
+                        Modifier.align(Alignment.TopEnd).padding(7.dp).size(28.dp),
+                        tint = glasmioColors().accent,
+                    )
+                }
             }
-        }
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(albumTitle(album), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    album.media.maxOfOrNull(ResultMedia::createdAt)?.takeIf { it > 0L }?.let { formatTime(it).substring(5, 16) }.orEmpty(),
-                    maxLines = 1,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("${album.media.size} 项", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(albumTitle(album), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        album.media.maxOfOrNull(ResultMedia::createdAt)?.takeIf { it > 0L }?.let { formatTime(it).substring(5, 16) }.orEmpty(),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("${album.media.size} 项", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
@@ -2593,7 +2601,7 @@ private fun BackendScreen(state: AppUiState, viewModel: MainViewModel) {
                     Text("任务记录", style = MaterialTheme.typography.titleMedium)
                     Text("运行 ${jobs.count { it.state == JobState.RUNNING }} · 等待 ${jobs.count { it.state == JobState.PENDING }} · 已结束 ${jobs.count { it.state in setOf(JobState.SUCCESS, JobState.ERROR, JobState.CANCELLED) }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = { confirmClear = true }, enabled = pending > 0) { Text("清空等待") }
+                GlasmioSecondaryButton(onClick = { confirmClear = true }, enabled = pending > 0, text = "清空等待")
                 IconButton(onClick = viewModel::refreshTasks) { Icon(Icons.Default.Refresh, "刷新任务") }
             }
         }
@@ -2665,12 +2673,12 @@ private fun JobCard(job: JobSummary, viewModel: MainViewModel, tracked: Boolean)
 private fun EmptyState(icon: ImageVector, message: String) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 440.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(68.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+            GlasmioCard(modifier = Modifier.size(68.dp)) {
+                Icon(icon, null, Modifier.size(30.dp).align(Alignment.Center), tint = glasmioColors().accent)
             }
             Text(message.substringBefore('\n'), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             message.substringAfter('\n', "").takeIf { it.isNotBlank() }?.let {
-                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                Text(it, color = glasmioColors().secondaryContent, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
             }
         }
     }
@@ -2681,6 +2689,8 @@ private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, on
     var value by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text(title) },
         text = { OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), label = { Text("名称") }, singleLine = true) },
         confirmButton = { TextButton(onClick = { onConfirm(value) }, enabled = value.isNotBlank()) { Text("确定") } },
@@ -2701,6 +2711,8 @@ private fun SaveWorkflowAsDialog(
     var folderMenuExpanded by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("工作流另存为") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2768,6 +2780,8 @@ private fun MoveWorkflowDialog(
     var folder by remember(initialFolder) { mutableStateOf(initialFolder) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("选择目标文件夹") },
         text = {
             LazyColumn(
@@ -2777,13 +2791,15 @@ private fun MoveWorkflowDialog(
                 items(folders, key = { it }) { option ->
                     OutlinedCard(
                         modifier = Modifier.fillMaxWidth().clickable { folder = option },
+                        shape = glasmioShapes().medium,
                         colors = CardDefaults.outlinedCardColors(
                             containerColor = if (option == folder) {
-                                MaterialTheme.colorScheme.primaryContainer
+                                glasmioMaterialColors().primaryContainer
                             } else {
-                                MaterialTheme.colorScheme.surface
+                                glasmioColors().elevatedBackground
                             },
                         ),
+                        border = BorderStroke(1.dp, glasmioColors().subtleStroke),
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
@@ -2823,7 +2839,7 @@ private fun ImageListField(field: ParameterField, viewModel: MainViewModel, onUp
         Text("尚未添加参考图；不添加时仍可作为纯文本生成", style = MaterialTheme.typography.bodySmall)
     } else {
         images.forEachIndexed { index, path ->
-            OutlinedCard(Modifier.fillMaxWidth()) {
+            GlasmioCard(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2874,15 +2890,17 @@ private fun ImageListField(field: ParameterField, viewModel: MainViewModel, onUp
             Text("选择多张并上传")
         }
         if (!images.isNullOrEmpty()) {
-            OutlinedButton(
+            GlasmioSecondaryButton(
                 onClick = { viewModel.updateField(field.key, "[]") },
                 enabled = !field.linked,
-            ) { Text("清空") }
+                text = "清空",
+            )
         } else if (images == null) {
-            OutlinedButton(
+            GlasmioSecondaryButton(
                 onClick = { viewModel.updateField(field.key, "[]") },
                 enabled = !field.linked,
-            ) { Text("重置") }
+                text = "重置",
+            )
         }
     }
     Text("顺序会传给 Qwen：第 1 张是主图，提示词可用 <image1>、<image2>…引用", style = MaterialTheme.typography.labelSmall)
@@ -2897,6 +2915,8 @@ private fun WorkflowDraftConflictDialog(
 ) {
     AlertDialog(
         onDismissRequest = onKeepLocal,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("本地草稿与服务器版本冲突") },
         text = { Text(message) },
         confirmButton = {
@@ -2919,12 +2939,15 @@ private fun ConfirmDialog(
     confirmLabel: String = "确认",
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    // The Glasmio alert threads the backdrop explicitly, so it stays safe inside its own window.
+    GlasmioAlertDialog(
+        visible = true,
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = title,
+        message = message,
+        confirmText = confirmLabel,
+        dismissText = "取消",
+        onConfirm = onConfirm,
     )
 }
 
