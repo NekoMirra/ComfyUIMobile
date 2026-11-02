@@ -1,6 +1,7 @@
 package com.local.comfyuimobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,7 +35,8 @@ fun GlasmioShell(
     GlasmioBackdropHost(
         modifier = modifier.fillMaxSize(),
         sampledContent = { GlasmioBackdropBackground() },
-        overlayContent = { content() },
+        // Only the overlay layer may use the glass controls: the sampled layer would sample itself.
+        overlayContent = { GlasmioHostedScope { content() } },
     )
 }
 
@@ -75,6 +77,9 @@ private fun glasmioBackdropTint(colors: GlassColors): Brush {
  *
  * This is a thin wrapper over [GlassSurface] with the defaults the application uses, so a page
  * can opt into the liquid glass material without repeating the material parameters.
+ *
+ * Outside a backdrop host the panel falls back to a Material3 surface with the same tokens,
+ * because a glass surface without a host has nothing to sample.
  */
 @Composable
 fun GlasmioGlassSurface(
@@ -86,13 +91,25 @@ fun GlasmioGlassSurface(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    GlassSurface(
-        modifier = modifier,
-        style = style,
-        emphasis = emphasis,
-        shape = shape ?: GlasmioTheme.shapes.large,
-        sampleBackdrop = sampleBackdrop,
-        onClick = onClick,
-        content = content,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlassSurface(
+            modifier = modifier,
+            style = style,
+            emphasis = emphasis,
+            shape = shape ?: GlasmioTheme.shapes.large,
+            sampleBackdrop = sampleBackdrop,
+            onClick = onClick,
+            content = content,
+        )
+    } else {
+        androidx.compose.material3.Surface(
+            modifier = modifier.then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+            ),
+            shape = shape ?: GlasmioTheme.shapes.large,
+            color = glasmioColors().container,
+        ) {
+            Box { content() }
+        }
+    }
 }

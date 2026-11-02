@@ -2168,10 +2168,13 @@ private fun ResultMediaGrid(
         gridItems(media, key = { it.stableKey() }) { item ->
             val selected = item.stableKey() in selectedKeys
             GlasmioCard(
-                Modifier.fillMaxWidth().combinedClickable(
+                modifier = Modifier.fillMaxWidth().combinedClickable(
                     onClick = { if (selectionMode) onToggleSelection(item) else onOpen(item) },
                     onLongClick = { onToggleSelection(item) },
                 ),
+                // Grid tiles sit next to each other, so sampling would make every tile
+                // refract its neighbours.
+                sampleBackdrop = false,
             ) {
                 Column(Modifier.fillMaxWidth()) {
                     Box(Modifier.fillMaxWidth()) {
@@ -2207,10 +2210,13 @@ private fun AlbumTile(
 ) {
     val cover = album.media.firstOrNull { it.kind == MediaKind.IMAGE } ?: album.media.first()
     GlasmioCard(
-        Modifier.fillMaxWidth().combinedClickable(
+        modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = { if (selectionMode) onToggleSelection() else onClick() },
             onLongClick = onToggleSelection,
         ),
+        // Gallery tiles sit next to each other, so sampling would make every tile
+        // refract its neighbours.
+        sampleBackdrop = false,
     ) {
         Column(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth()) {

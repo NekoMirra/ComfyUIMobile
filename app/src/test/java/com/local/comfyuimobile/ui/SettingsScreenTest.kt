@@ -146,8 +146,11 @@ class SettingsScreenTest {
         activity = controller.get()
         val viewModel = ViewModelProvider(activity)[MainViewModel::class.java]
         activity.setContent {
-            ComfyMobileTheme {
-                SettingsScreen(state, viewModel, SnackbarHostState(), onOpenGuide = { guideOpened = true }) { dismissed = true }
+            ComfyMobileTheme(liquidGlassEnabled = false) {
+                // The glass material never idles under Robolectric, so the harness stays unhosted.
+                GlasmioTestHost {
+                    SettingsScreen(state, viewModel, SnackbarHostState(), onOpenGuide = { guideOpened = true }) { dismissed = true }
+                }
             }
         }
         settle()

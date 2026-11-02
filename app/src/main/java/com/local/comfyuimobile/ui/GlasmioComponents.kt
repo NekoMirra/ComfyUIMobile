@@ -1,13 +1,22 @@
 package com.local.comfyuimobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +37,9 @@ import io.github.neoruaa.glasmio.ui.GlasmioListRow as GlasmioNativeListRow
 
 /**
  * Grouped list section. Mirrors the existing `SettingsGroup` call shape.
+ *
+ * Outside a backdrop host the section falls back to a plain Material3 column with the same
+ * section title tokens.
  */
 @Composable
 fun GlasmioListSection(
@@ -37,15 +49,30 @@ fun GlasmioListSection(
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (title != null) {
-            GlasmioSectionTitle(title)
+            if (LocalGlasmioHosted.current) {
+                GlasmioSectionTitle(title)
+            } else {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = glasmioColors().secondaryContent,
+                    modifier = Modifier.padding(start = 16.dp),
+                )
+            }
         }
-        GlasmioGroupedList(modifier = Modifier.fillMaxWidth(), content = content)
+        if (LocalGlasmioHosted.current) {
+            GlasmioGroupedList(modifier = Modifier.fillMaxWidth(), content = content)
+        } else {
+            content()
+        }
     }
 }
 
 /**
  * List row with an optional leading icon and a trailing slot. Mirrors the existing
  * `SettingsLink` and `SettingsToggle` call shapes.
+ *
+ * Outside a backdrop host the row falls back to a Material3 row with the same tokens.
  */
 @Composable
 fun GlasmioListRow(
@@ -57,28 +84,64 @@ fun GlasmioListRow(
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    GlasmioNativeListRow(
-        title = title,
-        modifier = modifier,
-        subtitle = subtitle,
-        detail = detail,
-        leading = icon?.let { vector ->
-            {
+    if (LocalGlasmioHosted.current) {
+        GlasmioNativeListRow(
+            title = title,
+            modifier = modifier,
+            subtitle = subtitle,
+            detail = detail,
+            leading = icon?.let { vector ->
+                {
+                    Icon(
+                        imageVector = vector,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = GlasmioTheme.colors.accent,
+                    )
+                }
+            },
+            onClick = onClick,
+            trailing = trailing,
+        )
+    } else {
+        val glass = glasmioColors()
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
                 Icon(
-                    imageVector = vector,
+                    imageVector = icon,
                     contentDescription = null,
                     modifier = Modifier.size(22.dp),
-                    tint = GlasmioTheme.colors.accent,
+                    tint = glass.accent,
                 )
+                Spacer(Modifier.width(12.dp))
             }
-        },
-        onClick = onClick,
-        trailing = trailing,
-    )
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = glass.content)
+                if (subtitle != null) {
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = glass.secondaryContent)
+                }
+                if (detail != null) {
+                    Text(detail, style = MaterialTheme.typography.labelSmall, color = glass.tertiaryContent)
+                }
+            }
+            if (trailing != null) {
+                Spacer(Modifier.width(12.dp))
+                trailing()
+            }
+        }
+    }
 }
 
 /**
  * Switch row for the settings pages.
+ *
+ * Outside a backdrop host the row falls back to a Material3 row with the Material3 switch.
  */
 @Composable
 fun GlasmioToggleRow(
@@ -88,19 +151,37 @@ fun GlasmioToggleRow(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    GlasmioListRow(
-        title = title,
-        modifier = modifier,
-        subtitle = summary,
-        trailing = {
-            GlasmioSwitch(checked = checked, onCheckedChange = onCheckedChange)
-        },
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioListRow(
+            title = title,
+            modifier = modifier,
+            subtitle = summary,
+            trailing = {
+                GlasmioSwitch(checked = checked, onCheckedChange = onCheckedChange)
+            },
+        )
+    } else {
+        val glass = glasmioColors()
+        Row(
+            modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = glass.content)
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = glass.secondaryContent)
+            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
 }
 
 /**
  * Bottom sheet host.
+ *
+ * Outside a backdrop host the sheet falls back to the Material3 bottom sheet, because the Glasmio
+ * sheet samples a backdrop that a separate window does not have.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlasmioSheetHost(
     visible: Boolean,
@@ -109,17 +190,31 @@ fun GlasmioSheetHost(
     title: String = "",
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    GlasmioBottomSheet(
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-        visible = visible,
-        title = title,
-        content = content,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioBottomSheet(
+            onDismissRequest = onDismissRequest,
+            modifier = modifier,
+            visible = visible,
+            title = title,
+            content = content,
+        )
+    } else {
+        ModalBottomSheet(onDismissRequest = onDismissRequest, modifier = modifier) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                if (title.isNotBlank()) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                }
+                content()
+            }
+        }
+    }
 }
 
 /**
  * Alert dialog with one primary and one cancel action.
+ *
+ * Outside a backdrop host the dialog falls back to the Material3 alert with the same wording and
+ * button order.
  */
 @Composable
 fun GlasmioAlertDialog(
@@ -133,24 +228,35 @@ fun GlasmioAlertDialog(
     onConfirm: () -> Unit,
 ) {
     if (!visible) return
-    GlasmioNativeAlertDialog(
-        onDismissRequest = onDismissRequest,
-        title = title,
-        message = message,
-        visible = true,
-        buttons = listOf(
-            GlasmioAlertButtonSpec(
-                label = dismissText,
-                role = GlasmioAlertButtonRole.Cancel,
-                onClick = onDismissRequest,
+    if (LocalGlasmioHosted.current) {
+        GlasmioNativeAlertDialog(
+            onDismissRequest = onDismissRequest,
+            title = title,
+            message = message,
+            visible = true,
+            buttons = listOf(
+                GlasmioAlertButtonSpec(
+                    label = dismissText,
+                    role = GlasmioAlertButtonRole.Cancel,
+                    onClick = onDismissRequest,
+                ),
+                GlasmioAlertButtonSpec(
+                    label = confirmText,
+                    role = if (destructive) GlasmioAlertButtonRole.Destructive else GlasmioAlertButtonRole.Default,
+                    onClick = onConfirm,
+                ),
             ),
-            GlasmioAlertButtonSpec(
-                label = confirmText,
-                role = if (destructive) GlasmioAlertButtonRole.Destructive else GlasmioAlertButtonRole.Default,
-                onClick = onConfirm,
-            ),
-        ),
-    )
+        )
+    } else {
+        GlasmioMaterialAlertDialog(
+            onDismissRequest = onDismissRequest,
+            title = title,
+            message = message,
+            confirmText = confirmText,
+            dismissText = dismissText,
+            onConfirm = onConfirm,
+        )
+    }
 }
 
 /**
@@ -159,6 +265,8 @@ fun GlasmioAlertDialog(
  * A dialog or a bottom sheet lives in its own window, so the page backdrop is not sampled by the
  * alert. Inlining the alert keeps the content in the same window, where the glass material has a
  * backdrop to sample. Use it for confirmations that belong to a page.
+ *
+ * Outside a backdrop host the alert falls back to a Material3 surface with the same tokens.
  */
 @Composable
 fun GlasmioInlineAlert(
@@ -170,18 +278,42 @@ fun GlasmioInlineAlert(
     onConfirm: () -> Unit,
     onDismissRequest: () -> Unit,
 ) {
-    GlasmioNativeAlertSurface(
-        modifier = modifier,
-        title = title,
-        message = message,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
+    if (LocalGlasmioHosted.current) {
+        GlasmioNativeAlertSurface(
+            modifier = modifier,
+            title = title,
+            message = message,
         ) {
-            GlasmioSecondaryButton(onClick = onDismissRequest, text = dismissText)
-            GlasmioPrimaryButton(onClick = onConfirm, text = confirmText)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlasmioSecondaryButton(onClick = onDismissRequest, text = dismissText)
+                GlasmioPrimaryButton(onClick = onConfirm, text = confirmText)
+            }
+        }
+    } else {
+        val glass = glasmioColors()
+        Surface(
+            modifier = modifier,
+            shape = glasmioShapes().large,
+            color = glass.container,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, color = glass.content)
+                if (message != null) {
+                    Text(message, style = MaterialTheme.typography.bodyMedium, color = glass.secondaryContent)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    GlasmioSecondaryButton(onClick = onDismissRequest, text = dismissText)
+                    GlasmioPrimaryButton(onClick = onConfirm, text = confirmText)
+                }
+            }
         }
     }
 }

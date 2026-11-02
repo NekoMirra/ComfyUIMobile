@@ -1,8 +1,11 @@
 package com.local.comfyuimobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -12,9 +15,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import io.github.neoruaa.glasmio.core.GlasmioTheme
 import io.github.neoruaa.glasmio.glass.GlassEmphasis
 import io.github.neoruaa.glasmio.glass.GlasmioToolbarActionStyle
+import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
+import io.github.neoruaa.glasmio.glass.render.backdrops.emptyBackdrop
 import io.github.neoruaa.glasmio.icons.GlasmioIcon
 import io.github.neoruaa.glasmio.icons.GlasmioIconProvider
 import io.github.neoruaa.glasmio.ui.GlasmioButton
@@ -50,6 +62,9 @@ fun GlasmioIconHost(content: @Composable () -> Unit) {
 
 /**
  * Primary call-to-action button.
+ *
+ * Outside a backdrop host the button falls back to the Material3 form, so a control rendered in
+ * its own window keeps working.
  */
 @Composable
 fun GlasmioPrimaryButton(
@@ -58,19 +73,27 @@ fun GlasmioPrimaryButton(
     enabled: Boolean = true,
     text: String,
 ) {
-    GlasmioButton(
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-        emphasis = GlassEmphasis.Prominent,
-        size = GlasmioButtonSize.Medium,
-    ) {
-        Text(text, style = MaterialTheme.typography.labelLarge)
+    if (LocalGlasmioHosted.current) {
+        GlasmioButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            emphasis = GlassEmphasis.Prominent,
+            size = GlasmioButtonSize.Medium,
+        ) {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
+    } else {
+        Button(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
 /**
  * Secondary button, rendered with the regular glass emphasis.
+ *
+ * Outside a backdrop host the button falls back to the Material3 form.
  */
 @Composable
 fun GlasmioSecondaryButton(
@@ -79,19 +102,27 @@ fun GlasmioSecondaryButton(
     enabled: Boolean = true,
     text: String,
 ) {
-    GlasmioButton(
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-        emphasis = GlassEmphasis.Regular,
-        size = GlasmioButtonSize.Medium,
-    ) {
-        Text(text, style = MaterialTheme.typography.labelLarge)
+    if (LocalGlasmioHosted.current) {
+        GlasmioButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            emphasis = GlassEmphasis.Regular,
+            size = GlasmioButtonSize.Medium,
+        ) {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
 /**
  * Icon-only action, for example a toolbar button.
+ *
+ * Outside a backdrop host the action falls back to the Material3 form.
  */
 @Composable
 fun GlasmioIconAction(
@@ -102,36 +133,68 @@ fun GlasmioIconAction(
     icon: ImageVector,
     tint: Color = Color.Unspecified,
 ) {
-    GlasmioIconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(22.dp),
-            tint = tint,
-        )
+    if (LocalGlasmioHosted.current) {
+        GlasmioIconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(22.dp),
+                tint = tint,
+            )
+        }
+    } else {
+        IconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(22.dp),
+                tint = tint,
+            )
+        }
     }
 }
 
 /**
  * Glass card. Mirrors the Material3 `Card` call shape.
  *
- * A card is a glass surface, so it must live inside the Glasmio backdrop host.
+ * A card is a glass surface, so it must live inside the Glasmio backdrop host. Outside a host the
+ * card falls back to the Material3 surface with the same container colour and corner radius.
+ *
+ * [sampleBackdrop] controls whether the card refracts the page backdrop. Turn it off for surfaces
+ * that cover a large area or that host an animating progress bar: such a surface would otherwise
+ * sample its own pixels, which smears the content and lags behind the animation.
  */
 @Composable
 fun GlasmioCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    sampleBackdrop: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    GlasmioNativeCard(
-        modifier = modifier,
-        onClick = onClick,
-        content = content,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioNativeCard(
+            modifier = modifier,
+            backdrop = if (sampleBackdrop) LocalGlassBackdrop.current else emptyBackdrop(),
+            onClick = onClick,
+            content = content,
+        )
+    } else {
+        Surface(
+            modifier = modifier.then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+            ),
+            shape = glasmioShapes().large,
+            color = glasmioColors().container,
+        ) {
+            Box { content() }
+        }
+    }
 }
 
 /**
  * Value pill shown at the trailing edge of a list row. Mirrors the Material3 `AssistChip` shape.
+ *
+ * Outside a backdrop host the pill falls back to a Material3 surface with the same tokens.
  */
 @Composable
 fun GlasmioValuePill(
@@ -140,17 +203,34 @@ fun GlasmioValuePill(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    GlasmioNativeValuePill(
-        text = text,
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioNativeValuePill(
+            text = text,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    } else {
+        Surface(
+            modifier = modifier.clickable(enabled = enabled, onClick = onClick),
+            shape = glasmioShapes().extraSmall,
+            color = glasmioColors().container,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                color = glasmioColors().content,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+    }
 }
 
 /**
  * Segmented choice row. Mirrors the existing `StudioChoices` call shape so a screen can be
  * migrated by swapping the composable name.
+ *
+ * Outside a backdrop host the row falls back to Material3 text buttons with the same tokens.
  */
 @Composable
 fun GlasmioSegmentedChoice(
@@ -159,13 +239,33 @@ fun GlasmioSegmentedChoice(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val items = labels.mapIndexed { index, label -> index to label }
-    GlasmioSegmentedControl(
-        items = items,
-        selected = selected,
-        onSelected = onSelect,
-        modifier = modifier.fillMaxWidth(),
-    )
+    if (LocalGlasmioHosted.current) {
+        val items = labels.mapIndexed { index, label -> index to label }
+        GlasmioSegmentedControl(
+            items = items,
+            selected = selected,
+            onSelected = onSelect,
+            modifier = modifier.fillMaxWidth(),
+        )
+    } else {
+        val glass = glasmioColors()
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            labels.forEachIndexed { index, label ->
+                TextButton(
+                    onClick = { onSelect(index) },
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (index == selected) glass.prominentContainer else Color.Transparent,
+                        contentColor = if (index == selected) glass.content else glass.secondaryContent,
+                    ),
+                ) {
+                    Text(label, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -192,6 +292,8 @@ fun GlasmioBadge(
 
 /**
  * Top toolbar with a title and a trailing action slot.
+ *
+ * Outside a backdrop host the toolbar falls back to a Material3 surface with the same tokens.
  */
 @Composable
 fun GlasmioToolbarBar(
@@ -200,17 +302,37 @@ fun GlasmioToolbarBar(
     subtitle: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    GlasmioTopBar(
-        title = title,
-        modifier = modifier,
-        subtitle = subtitle,
-        actions = actions,
-        actionsStyle = GlasmioToolbarActionStyle.Merged,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioTopBar(
+            title = title,
+            modifier = modifier,
+            subtitle = subtitle,
+            actions = actions,
+            actionsStyle = GlasmioToolbarActionStyle.Merged,
+        )
+    } else {
+        val glass = glasmioColors()
+        Surface(modifier = modifier, color = glass.elevatedBackground) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, color = glass.content)
+                    if (subtitle != null) {
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = glass.secondaryContent)
+                    }
+                }
+                actions()
+            }
+        }
+    }
 }
 
 /**
  * Text input field. Mirrors the Material3 `OutlinedTextField` call shape.
+ *
+ * Outside a backdrop host the field falls back to the Material3 outlined text field.
  */
 @Composable
 fun GlasmioTextInput(
@@ -223,16 +345,29 @@ fun GlasmioTextInput(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
-    GlasmioTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier,
-        placeholder = placeholder,
-        enabled = enabled,
-        visualTransformation = visualTransformation,
-        keyboardOptions = keyboardOptions,
-        keyboardActions = keyboardActions,
-    )
+    if (LocalGlasmioHosted.current) {
+        GlasmioTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            placeholder = placeholder,
+            enabled = enabled,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+        )
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            enabled = enabled,
+            placeholder = { Text(placeholder) },
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+        )
+    }
 }
 
 /**
