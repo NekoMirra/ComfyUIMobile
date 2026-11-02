@@ -33,7 +33,9 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Settings
@@ -51,6 +53,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -84,14 +87,16 @@ import com.local.comfyuimobile.BuildConfig
 import com.local.comfyuimobile.MainViewModel
 import com.local.comfyuimobile.model.AppUiState
 import com.local.comfyuimobile.model.ConnectionStatus
+import com.local.comfyuimobile.model.ServerProfile
+import com.local.comfyuimobile.network.ServerCapabilities
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
 private enum class SettingsPage(val title: String) {
-    OVERVIEW("设置"), SERVER("服务器连接"), RESULTS("本地作品"),
-    DRAFTS("工作流草稿"), LOGS("诊断日志"), LOG_VIEW("日志内容"), UPDATE("软件更新"),
+    OVERVIEW("设置"), SERVER("服务器连接"), SERVER_PROFILES("服务器档案"), SERVER_CAPABILITIES("服务器能力"),
+    RESULTS("本地作品"), DRAFTS("工作流草稿"), LOGS("诊断日志"), LOG_VIEW("日志内容"), UPDATE("软件更新"),
 }
 
 private enum class SettingsConfirmation { DELETE_RESULTS, CLEAR_DRAFTS, CLEAR_LOGS }
@@ -103,6 +108,16 @@ internal fun SettingsScreen(
     viewModel: MainViewModel,
     snackbar: SnackbarHostState,
     onOpenGuide: () -> Unit = {},
+    capabilities: ServerCapabilities? = null,
+    capabilitiesLoading: Boolean = false,
+    capabilitiesError: String? = null,
+    onOpenCapabilities: () -> Unit = {},
+    onRefreshCapabilities: () -> Unit = {},
+    onCopyDiagnostics: (String) -> Unit = {},
+    onRenameServer: (String, String) -> Unit = { _, _ -> },
+    onSetServerPinned: (String, Boolean) -> Unit = { _, _ -> },
+    onRemoveServer: (String) -> Unit = {},
+    pinnedServerUrls: Set<String> = emptySet(),
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -111,6 +126,7 @@ internal fun SettingsScreen(
     var page by rememberSaveable { mutableStateOf(SettingsPage.OVERVIEW) }
     val expanded = LocalConfiguration.current.screenWidthDp >= 720
     var confirmation by remember { mutableStateOf<SettingsConfirmation?>(null) }
+    var renamingProfile by remember { mutableStateOf<ServerProfile?>(null) }
     var diagnosticLog by remember { mutableStateOf("") }
     var pendingLogExport by remember { mutableStateOf("") }
     val logExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -125,6 +141,7 @@ internal fun SettingsScreen(
         when (page) {
             SettingsPage.OVERVIEW -> onDismiss()
             SettingsPage.LOG_VIEW -> page = SettingsPage.LOGS
+            SettingsPage.SERVER_PROFILES, SettingsPage.SERVER_CAPABILITIES -> page = SettingsPage.SERVER
             else -> page = SettingsPage.OVERVIEW
         }
     }
@@ -162,6 +179,8 @@ internal fun SettingsScreen(
                                 Row(Modifier.padding(horizontal = 12.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Icon(when (target) {
                                         SettingsPage.SERVER -> Icons.Default.Wifi
+                                        SettingsPage.SERVER_PROFILES -> Icons.Default.Folder
+                                        SettingsPage.SERVER_CAPABILITIES -> Icons.Default.Insights
                                         SettingsPage.RESULTS -> Icons.Default.Image
                                         SettingsPage.DRAFTS -> Icons.Default.Save
                                         SettingsPage.LOGS, SettingsPage.LOG_VIEW -> Icons.Default.Description
@@ -273,6 +292,136 @@ internal fun SettingsScreen(
                                         } else {
                                             SettingsHint("返回连接页可添加服务器或扫描局域网。")
                                         }
+                                    }
+                                    item {
+                                        SettingsGroup("档案与诊断") {
+                                            SettingsLink(
+                                                Icons.Default.Folder, "服务器档案管理",
+                                                "${state.savedServers.size} 台已保存 · 可重命名、置顶或删除",
+                                            ) { page = SettingsPage.SERVER_PROFILES }
+                                            SettingsDivider()
+                                            SettingsLink(
+                                                Icons.Default.Insights, "服务器能力与诊断",
+                                                capabilities?.summaryLine() ?: "尚未读取服务器能力",
+                                            ) { page = SettingsPage.SERVER_CAPABILITIES }
+                                            SettingsDivider()
+                                            SettingsLink(
+                                                Icons.Default.Save, "输出白名单规则",
+                                                "${state.cacheOutputRules.count { it.enabled }} 条已启用 / ${state.cacheOutputRules.size} 条",
+                                            ) { page = SettingsPage.RESULTS }
+                                            SettingsDivider()
+                                            SettingsLink(
+                                                Icons.Default.Description, "诊断日志",
+                                                if (state.loggingEnabled) "正在记录运行和闪退日志" else "日志记录已关闭",
+                                            ) { page = SettingsPage.LOGS }
+                                        }
+                                    }
+                                }
+                                SettingsPage.SERVER_PROFILES -> {
+                                    item {
+                                        SettingsGroup("已保存的服务器") {
+                                            SettingsDetail("${state.savedServers.size} 台已保存", "置顶的服务器会排在最前面，最近连接的排在前面。")
+                                        }
+                                    }
+                                    if (state.savedServers.isEmpty()) {
+                                        item {
+                                            SettingsGroup {
+                                                SettingsDetail("尚未保存服务器", "返回连接页添加地址或扫描局域网。")
+                                            }
+                                        }
+                                    }
+                                    items(state.savedServers) { profile ->
+                                        SettingsGroup {
+                                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text(profile.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                                    if (profile.baseUrl in pinnedServerUrls) StudioBadge("已置顶")
+                                                }
+                                                Text(profile.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text(serverProfileMeta(profile), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            SettingsDivider()
+                                            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                TextButton(onClick = { renamingProfile = profile }) { Text("重命名") }
+                                                TextButton(
+                                                    onClick = { onSetServerPinned(profile.baseUrl, profile.baseUrl !in pinnedServerUrls) },
+                                                ) { Text(if (profile.baseUrl in pinnedServerUrls) "取消置顶" else "置顶") }
+                                                TextButton(onClick = { onRemoveServer(profile.baseUrl) }) {
+                                                    Text("删除", color = MaterialTheme.colorScheme.error)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    item {
+                                        SettingsHint("删除档案只清理本机记录，不会影响服务器上的工作流和作品。")
+                                    }
+                                }
+                                SettingsPage.SERVER_CAPABILITIES -> {
+                                    item {
+                                        SettingsGroup("服务器能力") {
+                                            if (capabilities == null) {
+                                                SettingsDetail(
+                                                    "尚未读取服务器能力",
+                                                    capabilitiesError ?: "连接服务器后可以读取版本、队列与显卡状态。",
+                                                )
+                                            } else {
+                                                SettingsDetail("ComfyUI", capabilities.comfyVersion.ifBlank { "未知" })
+                                                SettingsDivider()
+                                                SettingsDetail("前端版本", capabilities.frontendVersion.ifBlank { "未报告" })
+                                                SettingsDivider()
+                                                SettingsDetail("Python / PyTorch", listOf(capabilities.pythonVersion, capabilities.pytorchVersion).filter { it.isNotBlank() }.joinToString(" / ").ifBlank { "未报告" })
+                                                if (capabilities.ramTotal > 0L) {
+                                                    SettingsDivider()
+                                                    SettingsDetail("内存", "${settingsSize(capabilities.ramFree)} 可用 / ${settingsSize(capabilities.ramTotal)}")
+                                                }
+                                                if (capabilities.deviceName.isNotBlank()) {
+                                                    SettingsDivider()
+                                                    SettingsDetail(
+                                                        capabilities.deviceName,
+                                                        if (capabilities.vramTotal > 0L) {
+                                                            "显存可用 ${settingsSize(capabilities.vramFree)} / ${settingsSize(capabilities.vramTotal)}"
+                                                        } else {
+                                                            "显存信息未报告"
+                                                        },
+                                                    )
+                                                }
+                                                SettingsDivider()
+                                                SettingsDetail("队列", "运行中 ${capabilities.queueRunningCount} · 等待中 ${capabilities.queuePendingCount}")
+                                                SettingsDivider()
+                                                SettingsDetail(
+                                                    "assets 能力",
+                                                    buildString {
+                                                        append(if (capabilities.assetsEnabled) "已启用" else "未启用")
+                                                        append(" · 预览元数据")
+                                                        append(if (capabilities.supportsPreviewMetadata) "支持" else "不支持")
+                                                        if (capabilities.maxUploadSize > 0L) {
+                                                            append(" · 上传上限 ${settingsSize(capabilities.maxUploadSize)}")
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    item {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            OutlinedButton(
+                                                onClick = onOpenCapabilities,
+                                                modifier = Modifier.weight(1f),
+                                                enabled = capabilities != null,
+                                            ) {
+                                                Text("打开能力面板")
+                                            }
+                                            OutlinedButton(
+                                                onClick = onRefreshCapabilities,
+                                                modifier = Modifier.weight(1f),
+                                                enabled = !capabilitiesLoading,
+                                            ) {
+                                                Text(if (capabilitiesLoading) "正在读取…" else "刷新")
+                                            }
+                                        }
+                                    }
+                                    item {
+                                        SettingsHint("能力数据来自 /system_stats、/features 与 /queue；读取失败时会在能力面板中显示具体原因。")
                                     }
                                 }
                                 SettingsPage.RESULTS -> {
@@ -412,6 +561,32 @@ internal fun SettingsScreen(
         }
     }
 
+    renamingProfile?.let { profile ->
+        var draftName by remember(profile.baseUrl) { mutableStateOf(profile.name) }
+        AlertDialog(
+            onDismissRequest = { renamingProfile = null },
+            title = { Text("重命名服务器") },
+            text = {
+                OutlinedTextField(
+                    value = draftName,
+                    onValueChange = { draftName = it },
+                    singleLine = true,
+                    label = { Text("名称") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameServer(profile.baseUrl, draftName.trim())
+                        renamingProfile = null
+                    },
+                    enabled = draftName.isNotBlank(),
+                ) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { renamingProfile = null }) { Text("取消") } },
+        )
+    }
+
     confirmation?.let { action ->
         val title = when (action) {
             SettingsConfirmation.DELETE_RESULTS -> "删除全部本地作品？"
@@ -532,4 +707,15 @@ private fun settingsSize(bytes: Long): String = if (bytes >= 1024L * 1024L * 102
     String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024 * 1024))
 } else {
     String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024))
+}
+
+/** Version and last successful use of a saved server. */
+private fun serverProfileMeta(profile: ServerProfile): String {
+    val version = profile.comfyVersion.takeIf { it.isNotBlank() }?.let { "ComfyUI $it" } ?: "版本未知"
+    val seen = if (profile.lastSeen > 0L) {
+        "最后使用 ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(profile.lastSeen))}"
+    } else {
+        "尚未连接成功"
+    }
+    return "$version · $seen"
 }
