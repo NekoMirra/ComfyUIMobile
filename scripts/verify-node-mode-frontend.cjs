@@ -44,6 +44,24 @@ function httpGetJson(url) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * ComfyUI 的官方前端在启动时会重定向并重建执行上下文，此时正在进行的
+ * Runtime.evaluate 会以 "Execution context was destroyed" 失败。这是浏览器导航的竞态，
+ * 不是被测语义的失败，所以只对这类瞬时错误重试，断言本身不变。
+ */
+const TRANSIENT_CDP_ERRORS = [
+  'Execution context was destroyed',
+  'Cannot find context with specified id',
+  'Inspected target navigated or closed',
+  'Target closed',
+  'Session with given id not found',
+];
+
+function isTransientCdpError(error) {
+  const message = String((error && error.message) || error || '');
+  return TRANSIENT_CDP_ERRORS.some((needle) => message.includes(needle));
+}
+
 async function waitForTarget(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -263,7 +281,23 @@ async function main() {
     });
     client = new CdpClient(socket);
     await client.send('Runtime.enable');
-    const raw = await client.evaluate(PAGE_SCRIPT);
+    // 官方前端启动时会重定向页面并重建执行上下文，第一次 evaluate 可能正好撞上导航。
+    // 只对这类瞬时 CDP 错误重试：等待页面稳定后在新上下文里重新执行同一段脚本。
+    let raw = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        raw = await client.evaluate(PAGE_SCRIPT);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientCdpError(error) || attempt === 4) break;
+        console.error(`（第 ${attempt} 次执行撞上页面导航，稍后重试：${error.message}）`);
+        await sleep(2000);
+      }
+    }
+    if (lastError) throw lastError;
     const result = JSON.parse(raw);
     if (!result.ok) {
       console.error('FAIL: ' + result.error);
