@@ -138,13 +138,24 @@ fun NodeGraphView(
         offset = fit.second
     }
 
-    val indeterminate = rememberInfiniteTransition(label = "node-graph-progress")
-    val indeterminatePhase by indeterminate.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
-        label = "node-graph-indeterminate",
-    )
+    // 只有「执行中且还没有进度值」的节点才需要不确定态的滑动段。
+    // 空闲时不启动无限动画：否则画布会一直占用帧时钟，设备上空转耗电，
+    // 在没有真实图形管线的测试环境里也会让帧时钟永远无法进入空闲。
+    val needsIndeterminate = boxes.any { box ->
+        executingNodeIds.contains(box.node.id) && nodeProgress[box.node.id] == null
+    }
+    val indeterminatePhase = if (needsIndeterminate) {
+        val indeterminate = rememberInfiniteTransition(label = "node-graph-progress")
+        val phase by indeterminate.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
+            label = "node-graph-indeterminate",
+        )
+        phase
+    } else {
+        0f
+    }
 
     Canvas(
         modifier = modifier

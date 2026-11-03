@@ -863,7 +863,10 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
     var historyField by remember { mutableStateOf<ParameterField?>(null) }
     var uploadField by remember { mutableStateOf<ParameterField?>(null) }
     var cacheNode by remember { mutableStateOf<WorkflowNode?>(null) }
-    var graphExpanded by remember(workflow.entry.path) { mutableStateOf(true) }
+    // 节点图在小屏上会把参数挤到首屏之外（320dp + 1.3 倍字号时参数区被推出可视区），
+    // 因此窄屏默认收起，宽屏保持展开，用户仍可手动展开。
+    val wideParameterLayout = LocalConfiguration.current.screenWidthDp >= 720
+    var graphExpanded by remember(workflow.entry.path) { mutableStateOf(wideParameterLayout) }
     var serverPickerField by remember { mutableStateOf<ParameterField?>(null) }
     var libraryField by remember { mutableStateOf<ParameterField?>(null) }
     var showLibraryBrowser by remember { mutableStateOf(false) }
@@ -948,8 +951,8 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 ) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f)) {
+val workflowTitle: @Composable (Modifier) -> Unit = { titleModifier ->
+                            Box(titleModifier) {
                                 Row(
                                     Modifier.fillMaxWidth().clickable { recentMenuExpanded = true },
                                     verticalAlignment = Alignment.CenterVertically,
@@ -965,11 +968,13 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                                         DropdownMenuItem(
                                             text = { Text(entry.name.removeSuffix(".json"), maxLines = 2) },
                                             leadingIcon = { Icon(if (entry.path == workflow.entry.path) Icons.Default.CheckCircle else Icons.Default.History, null) },
-                                            onClick = { recentMenuExpanded = false; if (entry.path != workflow.entry.path) viewModel.selectWorkflow(entry, recordAsOpened = true) },
+                                            onClick = { recentMenuExpanded = false; viewModel.selectWorkflow(entry, recordAsOpened = true) },
                                         )
                                     }
                                 }
                             }
+                        }
+                        val workflowActions: @Composable RowScope.() -> Unit = {
                             GlasmioSecondaryButton(
                                 onClick = { viewModel.saveWorkflow() },
                                 enabled = !state.loading && !state.generating,
@@ -988,6 +993,25 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                                         saveAsDialog = true
                                     })
                                     DropdownMenuItem(text = { Text("表单布局") }, onClick = { toolbarMenuExpanded = false; layoutDialog = true })
+                                }
+                            }
+                        }
+                        // 窄屏（尤其是大字号）上把标题和操作按钮挤在同一行会把标题压成一条窄柱，
+                        // 标题换行后把整个参数区推出首屏，因此窄屏改成上下两行。
+                        if (wideParameterLayout) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                workflowTitle(Modifier.weight(1f))
+                                workflowActions()
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                workflowTitle(Modifier.fillMaxWidth())
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    workflowActions()
                                 }
                             }
                         }
@@ -1290,6 +1314,14 @@ private fun NodeParameterCard(
     LaunchedEffect(active) {
         if (active) {
             kotlinx.coroutines.delay(50)
+            bringIntoViewRequester.bringIntoView()
+        }
+    }
+    // 展开后参数区会出现在卡片下方，窄屏上这时它已经在可视区之外，
+    // 所以展开时把卡片滚进可视区，用户不用再手动下滑才能看到参数。
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            kotlinx.coroutines.delay(80)
             bringIntoViewRequester.bringIntoView()
         }
     }
