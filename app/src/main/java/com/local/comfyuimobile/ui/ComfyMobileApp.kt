@@ -16,6 +16,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -69,6 +70,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -78,6 +80,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -91,6 +94,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -102,6 +106,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.VideoFile
@@ -109,7 +115,7 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
@@ -159,6 +165,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
@@ -167,12 +174,15 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import io.github.neoruaa.glasmio.core.GlasmioTheme
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -189,8 +199,13 @@ import com.local.comfyuimobile.bridge.ComfyBridge
 import com.local.comfyuimobile.bridge.FieldValidator
 import com.local.comfyuimobile.bridge.ImageListValue
 import com.local.comfyuimobile.data.CachePolicy
+import com.local.comfyuimobile.data.PromptEntry
+import com.local.comfyuimobile.data.PromptHistory
+import com.local.comfyuimobile.data.PromptLibrarySelection
+import com.local.comfyuimobile.data.PromptLibraryStore
 import com.local.comfyuimobile.data.ResultParameterReport
 import com.local.comfyuimobile.data.RecentWorkflows
+import com.local.comfyuimobile.data.ServerGalleryMerge
 import com.local.comfyuimobile.data.WorkflowBrowser
 import com.local.comfyuimobile.data.WorkflowPath
 import com.local.comfyuimobile.model.AppDestination
@@ -199,15 +214,19 @@ import com.local.comfyuimobile.model.ConnectionStatus
 import com.local.comfyuimobile.model.JobState
 import com.local.comfyuimobile.model.JobSummary
 import com.local.comfyuimobile.model.MediaKind
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.ParameterField
 import com.local.comfyuimobile.model.ParameterKind
 import com.local.comfyuimobile.model.ParameterSection
 import com.local.comfyuimobile.model.ResultMedia
 import com.local.comfyuimobile.model.ResultSource
+import com.local.comfyuimobile.model.ServerAsset
+import com.local.comfyuimobile.model.ServerJob
 import com.local.comfyuimobile.model.ServerProfile
 import com.local.comfyuimobile.model.WorkflowEntry
 import com.local.comfyuimobile.model.WorkflowConnectionMarker
 import com.local.comfyuimobile.model.WorkflowNode
+import com.local.comfyuimobile.network.ServerAssetsClient
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -215,6 +234,14 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.launch
 
 private const val IME_RELOCATION_SUPPRESSION_MILLIS = 700L
+
+/**
+ * Chrome colour of the full screen media viewer.
+ *
+ * The viewer always sits on an opaque black surface, so its chrome keeps a light colour in both
+ * light and dark mode instead of following the page theme.
+ */
+private val AppShellMediaChromeColor = Color.White
 
 private enum class MainPage(val label: String, val icon: ImageVector) {
     WORKFLOWS("工作流", Icons.Default.Folder),
@@ -224,14 +251,17 @@ private enum class MainPage(val label: String, val icon: ImageVector) {
 }
 
 private enum class ResultLayout { ALL, ALBUMS }
+private enum class ResultSegment { LOCAL, CLOUD, SERVER }
 private data class ResultAlbum(val jobId: String, val media: List<ResultMedia>)
 
 @Composable
 fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val clipboard = LocalClipboardManager.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showGuide by rememberSaveable { mutableStateOf(false) }
+    var showCapabilitySheet by remember { mutableStateOf(false) }
     val needsGuide = state.preferencesLoaded && !state.onboardingCompleted
     val context = LocalContext.current
     val advancedEditorLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -260,74 +290,116 @@ fun ComfyMobileApp(viewModel: MainViewModel, bridge: ComfyBridge) {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(if (showSettings || showGuide || needsGuide || !state.preferencesLoaded) Modifier.clearAndSetSemantics { } else Modifier) {
-            if (state.activeServer == null) {
-                ConnectionPage(state, viewModel, snackbar, onOpenSettings = { showSettings = true }, onOpenGuide = { showGuide = true })
-            } else {
-                ConnectedApp(state, viewModel, snackbar, onOpenSettings = { showSettings = true })
-            }
-        }
-        key(bridge.webView) {
-            AndroidView(
-                factory = { context ->
-                    FrameLayout(context).apply {
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                        addView(bridge.webView.apply {
-                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                            isFocusable = false
-                            isFocusableInTouchMode = false
-                        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                    }
-                },
-                modifier = Modifier.size(1.dp).alpha(0f).clearAndSetSemantics { },
-                update = { container ->
-                    container.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                    bridge.webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                },
-            )
-        }
-        if (state.loading && state.advancedEditor) {
-            Surface(
-                modifier = Modifier.align(Alignment.Center),
-                shape = RoundedCornerShape(16.dp),
-                tonalElevation = 6.dp,
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                    Text("正在准备高级编辑…")
+    GlasmioShell {
+        Box(Modifier.fillMaxSize()) {
+            Box(if (showSettings || showGuide || needsGuide || !state.preferencesLoaded) Modifier.clearAndSetSemantics { } else Modifier) {
+                if (state.activeServer == null) {
+                    ConnectionPage(state, viewModel, snackbar, onOpenSettings = { showSettings = true }, onOpenGuide = { showGuide = true })
+                } else {
+                    ConnectedApp(state, viewModel, snackbar, onOpenSettings = { showSettings = true })
                 }
             }
-        }
-        if (showSettings) {
-            Box(if (showGuide) Modifier.clearAndSetSemantics { } else Modifier) {
-                SettingsScreen(state, viewModel, snackbar, onOpenGuide = { showGuide = true }) { showSettings = false }
+            key(bridge.webView) {
+                AndroidView(
+                    factory = { context ->
+                        FrameLayout(context).apply {
+                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                            addView(bridge.webView.apply {
+                                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                                isFocusable = false
+                                isFocusableInTouchMode = false
+                            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                        }
+                    },
+                    modifier = Modifier.size(1.dp).alpha(0f).clearAndSetSemantics { },
+                    update = { container ->
+                        container.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                        bridge.webView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    },
+                )
             }
-        }
-        if (!state.preferencesLoaded) {
-            Surface(Modifier.fillMaxSize()) { }
-        } else if (showGuide || needsGuide) {
-            OnboardingScreen(onFinish = {
-                if (needsGuide) viewModel.completeOnboarding()
-                showGuide = false
-            })
+            if (state.loading && state.advancedEditor) {
+                GlasmioCard(modifier = Modifier.align(Alignment.Center)) {
+                    Row(
+                        Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                        Text("正在准备高级编辑…")
+                    }
+                }
+            }
+            if (showSettings) {
+                Box(if (showGuide) Modifier.clearAndSetSemantics { } else Modifier) {
+                    SettingsScreen(
+                        state = state,
+                        viewModel = viewModel,
+                        snackbar = snackbar,
+                        onOpenGuide = { showGuide = true },
+                        capabilities = state.serverCapabilities,
+                        capabilitiesLoading = state.serverCapabilitiesLoading,
+                        capabilitiesError = state.serverCapabilitiesError,
+                        onOpenCapabilities = { showCapabilitySheet = true },
+                        onRefreshCapabilities = viewModel::refreshServerCapabilities,
+                        onCopyDiagnostics = { text ->
+                            clipboard.setText(AnnotatedString(text))
+                            viewModel.postNotice("诊断信息已复制到剪贴板")
+                        },
+                        onRenameServer = viewModel::renameServer,
+                        onSetServerPinned = viewModel::setServerPinned,
+                        onRemoveServer = viewModel::removeServer,
+                        pinnedServerUrls = state.pinnedServerUrls,
+                    ) { showSettings = false }
+                }
+            }
+            if (!state.preferencesLoaded) {
+                Surface(Modifier.fillMaxSize(), color = glasmioColors().groupedBackground) { }
+            } else if (showGuide || needsGuide) {
+                OnboardingScreen(onFinish = {
+                    if (needsGuide) viewModel.completeOnboarding()
+                    showGuide = false
+                })
+            }
+            if (showCapabilitySheet) {
+                ServerCapabilitySheet(
+                    capabilities = state.serverCapabilities,
+                    loading = state.serverCapabilitiesLoading,
+                    error = state.serverCapabilitiesError,
+                    onRefresh = viewModel::refreshServerCapabilities,
+                    onCopyDiagnostics = { text ->
+                        clipboard.setText(AnnotatedString(text))
+                        viewModel.postNotice("诊断信息已复制到剪贴板")
+                    },
+                    onDismiss = { showCapabilitySheet = false },
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun ConnectionPage(state: AppUiState, viewModel: MainViewModel, snackbar: SnackbarHostState, onOpenSettings: () -> Unit, onOpenGuide: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
     ConnectionScreen(
         state = state, snackbar = snackbar, onOpenSettings = onOpenSettings,
         onServerInput = viewModel::setServerInput,
         onConnect = { address -> viewModel.setServerInput(address); viewModel.connect(address) },
         onScan = viewModel::scanLan, onRemoveServer = viewModel::removeServer,
         onOpenGuide = onOpenGuide,
+        capabilities = state.serverCapabilities,
+        capabilitiesLoading = state.serverCapabilitiesLoading,
+        capabilitiesError = state.serverCapabilitiesError,
+        onRefreshCapabilities = viewModel::refreshServerCapabilities,
+        onCopyDiagnostics = { text ->
+            clipboard.setText(AnnotatedString(text))
+            viewModel.postNotice("诊断信息已复制到剪贴板")
+        },
+        diagnosis = state.connectionDiagnosis,
+        pinnedServerUrls = state.pinnedServerUrls,
+        onRenameServer = viewModel::renameServer,
+        onSetServerPinned = viewModel::setServerPinned,
     )
 }
 
@@ -344,13 +416,14 @@ private val connectionStepNames = listOf(
 internal fun ConnectionProgressCard(state: AppUiState) {
     val current = state.connectionStep.coerceIn(1, state.connectionTotalSteps)
     val failed = state.status == ConnectionStatus.ERROR
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val glass = glasmioColors()
+    GlasmioCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 if (failed) "连接失败（第 $current/${state.connectionTotalSteps} 步）"
                 else "正在连接（第 $current/${state.connectionTotalSteps} 步）",
                 style = MaterialTheme.typography.titleMedium,
-                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                color = if (failed) MaterialTheme.colorScheme.error else glass.accent,
             )
             LinearProgressIndicator(
                 progress = { current.toFloat() / state.connectionTotalSteps },
@@ -367,8 +440,8 @@ internal fun ConnectionProgressCard(state: AppUiState) {
                 }
                 val color = when {
                     step == current && failed -> MaterialTheme.colorScheme.error
-                    step <= current -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    step <= current -> glass.accent
+                    else -> glass.secondaryContent
                 }
                 Text("$step. $name · $statusText", color = color, style = MaterialTheme.typography.bodySmall)
             }
@@ -383,7 +456,7 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var page by rememberSaveable { mutableStateOf(MainPage.WORKFLOWS) }
     val pageStates = rememberSaveableStateHolder()
-    var resultSource by rememberSaveable { mutableStateOf(ResultSource.LOCAL) }
+    var resultSegment by rememberSaveable { mutableStateOf(ResultSegment.LOCAL) }
     var resultLayout by rememberSaveable { mutableStateOf(ResultLayout.ALBUMS) }
     var resultAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = page == MainPage.RESULTS && resultAlbumId != null) {
@@ -398,10 +471,10 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
         if (request.destination == AppDestination.RESULTS && request.jobId != null) {
             resultLayout = ResultLayout.ALBUMS
             resultAlbumId = request.jobId
-            resultSource = if (state.localResults.any { it.jobId == request.jobId }) {
-                ResultSource.LOCAL
+            resultSegment = if (state.localResults.any { it.jobId == request.jobId }) {
+                ResultSegment.LOCAL
             } else {
-                ResultSource.CLOUD
+                ResultSegment.CLOUD
             }
             viewModel.refreshResults()
             viewModel.refreshLocalResults()
@@ -410,8 +483,8 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     }
     LaunchedEffect(resultAlbumId, state.localResults, state.results) {
         val jobId = resultAlbumId ?: return@LaunchedEffect
-        if (state.localResults.any { it.jobId == jobId }) resultSource = ResultSource.LOCAL
-        else if (state.results.any { it.jobId == jobId }) resultSource = ResultSource.CLOUD
+        if (state.localResults.any { it.jobId == jobId }) resultSegment = ResultSegment.LOCAL
+        else if (state.results.any { it.jobId == jobId }) resultSegment = ResultSegment.CLOUD
     }
     val toolbar: @Composable (Modifier) -> Unit = { modifier ->
         StudioToolbar(
@@ -425,26 +498,32 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     }
     Scaffold(
         modifier = Modifier.imePadding(),
+        // Transparent so the Glasmio backdrop painted by the shell stays visible.
+        containerColor = Color.Transparent,
         topBar = {
             toolbar(Modifier.windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top)))
         },
         bottomBar = {
             if (!expanded && !imeVisible) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    MainPage.entries.forEach { target ->
-                        NavigationBarItem(
-                            selected = page == target,
-                            onClick = { page = target },
-                            icon = { Icon(target.icon, null) },
-                            label = { Text(target.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
+                // The bar floats above the page, so it uses a plain tinted surface instead of glass:
+                // a glass panel here would sample the whole screen instead of the page backdrop.
+                MaterialTheme(shapes = GlasmioTheme.shapes.materialShapes()) {
+                    NavigationBar(containerColor = glasmioColors().elevatedBackground) {
+                        MainPage.entries.forEach { target ->
+                            NavigationBarItem(
+                                selected = page == target,
+                                onClick = { page = target },
+                                icon = { Icon(target.icon, null) },
+                                label = { Text(target.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = glasmioMaterialColors().onSecondaryContainer,
+                                    selectedTextColor = glasmioColors().content,
+                                    indicatorColor = glasmioMaterialColors().secondaryContainer,
+                                    unselectedIconColor = glasmioColors().secondaryContent,
+                                    unselectedTextColor = glasmioColors().secondaryContent,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -453,26 +532,28 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
             if (expanded) {
-                NavigationRail(containerColor = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxHeight()) {
-                    Spacer(Modifier.height(16.dp))
-                    MainPage.entries.forEach { target ->
-                        NavigationRailItem(
-                            selected = page == target,
-                            onClick = { page = target },
-                            icon = { Icon(target.icon, null) },
-                            label = { Text(target.label) },
-                            modifier = Modifier.padding(vertical = 6.dp),
-                            colors = NavigationRailItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
+                MaterialTheme(shapes = GlasmioTheme.shapes.materialShapes()) {
+                    NavigationRail(containerColor = glasmioColors().groupedBackground, modifier = Modifier.fillMaxHeight()) {
+                        Spacer(Modifier.height(16.dp))
+                        MainPage.entries.forEach { target ->
+                            NavigationRailItem(
+                                selected = page == target,
+                                onClick = { page = target },
+                                icon = { Icon(target.icon, null) },
+                                label = { Text(target.label) },
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                colors = NavigationRailItemDefaults.colors(
+                                    selectedIconColor = glasmioMaterialColors().onSecondaryContainer,
+                                    selectedTextColor = glasmioColors().content,
+                                    indicatorColor = glasmioMaterialColors().secondaryContainer,
+                                    unselectedIconColor = glasmioColors().secondaryContent,
+                                    unselectedTextColor = glasmioColors().secondaryContent,
+                                ),
+                            )
+                        }
                     }
                 }
-                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                VerticalDivider(color = glasmioColors().subtleStroke)
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 pageStates.SaveableStateProvider(page.name) {
@@ -482,9 +563,9 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
                         MainPage.RESULTS -> ResultScreen(
                             state = state,
                             viewModel = viewModel,
-                            source = resultSource,
-                            onSourceChange = {
-                                resultSource = it
+                            segment = resultSegment,
+                            onSegmentChange = {
+                                resultSegment = it
                                 resultAlbumId = null
                             },
                             layout = resultLayout,
@@ -496,7 +577,7 @@ internal fun ConnectedApp(state: AppUiState, viewModel: MainViewModel, snackbar:
                     }
                 }
                 if (state.loading || state.generating) {
-                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize().background(glasmioMaterialColors().scrim.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
@@ -557,12 +638,12 @@ private fun WorkflowScreen(state: AppUiState, viewModel: MainViewModel, onOpenPa
         }
     }
     val selectionPanel: @Composable () -> Unit = {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        GlasmioCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (actionEntry != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("当前选择", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("当前选择", style = MaterialTheme.typography.labelSmall, color = glasmioColors().accent)
                             Text(actionEntry.name.removeSuffix(".json"), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                         Box {
@@ -576,15 +657,15 @@ private fun WorkflowScreen(state: AppUiState, viewModel: MainViewModel, onOpenPa
                                     viewModel.exportWorkflow(actionEntry) { name, raw -> exportRaw = raw; exportLauncher.launch(name) }
                                 })
                                 HorizontalDivider()
-                                DropdownMenuItem(text = { Text("删除工作流", color = MaterialTheme.colorScheme.error) }, onClick = { actionMenuExpanded = false; deleteDialog = true })
+                                DropdownMenuItem(text = { Text("删除工作流", color = glasmioAppColors().danger) }, onClick = { actionMenuExpanded = false; deleteDialog = true })
                             }
                         }
                     }
 
                 } else {
-                    Icon(Icons.Default.Hub, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Hub, null, Modifier.size(32.dp), tint = glasmioColors().accent)
                     Text("准备好开始创作", style = MaterialTheme.typography.titleMedium)
-                    Text("选择左侧工作流，再打开参数。双击工作流也可直接打开。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("选择左侧工作流，再打开参数。双击工作流也可直接打开。", style = MaterialTheme.typography.bodySmall, color = glasmioColors().secondaryContent)
                 }
             }
         }
@@ -592,8 +673,8 @@ private fun WorkflowScreen(state: AppUiState, viewModel: MainViewModel, onOpenPa
     val browserHeader: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!state.bridgeReady) {
-                OutlinedCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlasmioCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             when (state.status) {
                                 ConnectionStatus.ERROR -> "连接出现问题，请到后台页重新连接"
@@ -606,15 +687,19 @@ private fun WorkflowScreen(state: AppUiState, viewModel: MainViewModel, onOpenPa
                     }
                 }
             }
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                placeholder = { Text("搜索工作流") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Default.Search, null, tint = glasmioColors().secondaryContent)
+                GlasmioTextInput(
+                    value = search,
+                    onValueChange = { search = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = "搜索工作流",
+                )
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (currentFolder != WorkflowBrowser.ROOT && search.isBlank()) {
                     IconButton(onClick = { currentFolder = WorkflowBrowser.up(currentFolder) }) { Icon(Icons.Default.ChevronLeft, "上一级") }
@@ -681,11 +766,20 @@ private fun WorkflowScreen(state: AppUiState, viewModel: MainViewModel, onOpenPa
         if (actionEntry != null && WindowInsets.ime.getBottom(LocalDensity.current) == 0) Surface(
             modifier = Modifier.align(if (maxWidth >= 660.dp) Alignment.BottomEnd else Alignment.BottomCenter)
                 .padding(horizontal = 20.dp, vertical = 16.dp).widthIn(max = 320.dp),
-            shape = CircleShape, color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shape = glasmioShapes().extraLarge,
+            color = glasmioColors().elevatedBackground,
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, glasmioColors().subtleStroke),
         ) {
             Box(Modifier.padding(6.dp)) {
-                Button(onClick = openSelectedParameters, shape = CircleShape) {
+                Button(
+                    onClick = openSelectedParameters,
+                    shape = glasmioShapes().extraLarge,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = glasmioMaterialColors().primary,
+                        contentColor = glasmioMaterialColors().onPrimary,
+                    ),
+                ) {
                     Icon(Icons.Default.Tune, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Column {
@@ -725,27 +819,33 @@ private fun WorkflowRow(
     onLongClick: (() -> Unit)? = null,
     onDoubleClick: () -> Unit = {},
 ) {
-    Card(
+    val glass = glasmioColors()
+    GlasmioCard(
         modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = onClick,
             onLongClick = onLongClick,
             onDoubleClick = onDoubleClick,
         ),
-        colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).background(if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(13.dp)), contentAlignment = Alignment.Center) {
-                Icon(if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Hub, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
+        Box(Modifier.fillMaxWidth()) {
+            if (selected) {
+                Box(Modifier.matchParentSize().background(glass.accent.copy(alpha = 0.14f)))
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(entry.name.removeSuffix(".json"), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(if (entry.isDirectory) "文件夹" else "工作流 · ${formatSize(entry.size)}", style = MaterialTheme.typography.bodySmall, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(42.dp).background(glass.accent.copy(alpha = 0.14f), glasmioShapes().medium),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Hub, null, Modifier.size(21.dp), tint = glass.accent)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entry.name.removeSuffix(".json"), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(if (entry.isDirectory) "文件夹" else "工作流 · ${formatSize(entry.size)}", style = MaterialTheme.typography.bodySmall, maxLines = 1, color = glass.secondaryContent)
+                }
+                if (selected) Icon(Icons.Default.CheckCircle, "已选择", Modifier.size(20.dp), tint = glass.accent)
+                else if (entry.isDirectory) Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp), tint = glass.secondaryContent)
             }
-            if (selected) Icon(Icons.Default.CheckCircle, "已选择", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-            else if (entry.isDirectory) Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -763,6 +863,17 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
     var historyField by remember { mutableStateOf<ParameterField?>(null) }
     var uploadField by remember { mutableStateOf<ParameterField?>(null) }
     var cacheNode by remember { mutableStateOf<WorkflowNode?>(null) }
+    // 节点图在小屏上会把参数挤到首屏之外（320dp + 1.3 倍字号时参数区被推出可视区），
+    // 因此窄屏默认收起，宽屏保持展开，用户仍可手动展开。
+    val wideParameterLayout = LocalConfiguration.current.screenWidthDp >= 720
+    var graphExpanded by remember(workflow.entry.path) { mutableStateOf(wideParameterLayout) }
+    var serverPickerField by remember { mutableStateOf<ParameterField?>(null) }
+    var libraryField by remember { mutableStateOf<ParameterField?>(null) }
+    var showLibraryBrowser by remember { mutableStateOf(false) }
+    val serverAssetsClient = remember { ServerAssetsClient() }
+    val serverBaseUrl = state.activeServer?.baseUrl.orEmpty()
+    val applicationContext = LocalContext.current.applicationContext
+    val promptLibraryStore = remember(applicationContext) { PromptLibraryStore(applicationContext) }
     var recentMenuExpanded by remember { mutableStateOf(false) }
     var saveAsDialog by remember { mutableStateOf(false) }
     var saveAsName by remember { mutableStateOf("") }
@@ -836,13 +947,12 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                 modifier.verticalScroll(parameterScroll).padding(top = 4.dp, bottom = if (showActions) 96.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Card(
+                GlasmioCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+val workflowTitle: @Composable (Modifier) -> Unit = { titleModifier ->
+                            Box(titleModifier) {
                                 Row(
                                     Modifier.fillMaxWidth().clickable { recentMenuExpanded = true },
                                     verticalAlignment = Alignment.CenterVertically,
@@ -858,16 +968,21 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                                         DropdownMenuItem(
                                             text = { Text(entry.name.removeSuffix(".json"), maxLines = 2) },
                                             leadingIcon = { Icon(if (entry.path == workflow.entry.path) Icons.Default.CheckCircle else Icons.Default.History, null) },
-                                            onClick = { recentMenuExpanded = false; if (entry.path != workflow.entry.path) viewModel.selectWorkflow(entry, recordAsOpened = true) },
+                                            onClick = { recentMenuExpanded = false; viewModel.selectWorkflow(entry, recordAsOpened = true) },
                                         )
                                     }
                                 }
                             }
-                            FilledTonalButton(
+                        }
+                        val workflowActions: @Composable RowScope.() -> Unit = {
+                            GlasmioSecondaryButton(
                                 onClick = { viewModel.saveWorkflow() },
                                 enabled = !state.loading && !state.generating,
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                            ) { Text("保存", maxLines = 1) }
+                                text = "保存",
+                            )
+                            IconButton(onClick = { showLibraryBrowser = true }) {
+                                Icon(Icons.AutoMirrored.Filled.LibraryBooks, "浏览提示词库")
+                            }
                             Box {
                                 IconButton(onClick = { toolbarMenuExpanded = true }) { Icon(Icons.Default.MoreHoriz, "参数页操作") }
                                 DropdownMenu(expanded = toolbarMenuExpanded, onDismissRequest = { toolbarMenuExpanded = false }) {
@@ -878,6 +993,25 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                                         saveAsDialog = true
                                     })
                                     DropdownMenuItem(text = { Text("表单布局") }, onClick = { toolbarMenuExpanded = false; layoutDialog = true })
+                                }
+                            }
+                        }
+                        // 窄屏（尤其是大字号）上把标题和操作按钮挤在同一行会把标题压成一条窄柱，
+                        // 标题换行后把整个参数区推出首屏，因此窄屏改成上下两行。
+                        if (wideParameterLayout) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                workflowTitle(Modifier.weight(1f))
+                                workflowActions()
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                workflowTitle(Modifier.fillMaxWidth())
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    workflowActions()
                                 }
                             }
                         }
@@ -894,6 +1028,62 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                         }
                     }
                 }
+                GlasmioCard(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("节点图", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            Text(
+                                "${workflow.nodes.size} 个节点 · 点节点可定位参数",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            IconButton(onClick = { graphExpanded = !graphExpanded }) {
+                                Icon(
+                                    if (graphExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    if (graphExpanded) "收起节点图" else "展开节点图",
+                                )
+                            }
+                        }
+                        if (graphExpanded) {
+                            if (workflow.nodes.isEmpty()) {
+                                Text(
+                                    "当前工作流没有可显示的节点",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                NodeGraphView(
+                                    nodes = workflow.nodes,
+                                    links = workflow.links,
+                                    selectedNodeId = state.selectedNodeId,
+                                    executingNodeIds = state.executingNodeIds,
+                                    nodeProgress = state.nodeProgress,
+                                    nodeModes = state.nodeModes,
+                                    onSelectNode = { nodeId ->
+                                        viewModel.selectNode(nodeId)
+                                        expandedNodeIds = expandedNodeIds + nodeId
+                                        parameterScope.launch {
+                                            kotlinx.coroutines.delay(80)
+                                            nodeRequesters[nodeId]?.bringIntoView()
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .clip(glasmioShapes().small)
+                                        .background(glasmioMaterialColors().surfaceVariant),
+                                )
+                                Text(
+                                    "静音 / 绕过的节点会被淡化并标注角标，生成时不会进入执行链",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
                 nodes.forEach { (node, fields) ->
                     key(node.id) {
                         val nodeId = node.id
@@ -907,12 +1097,21 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
                             cached = state.cacheOutputRules.any {
                                 it.enabled && it.serverUrl == state.activeServer?.baseUrl && it.nodeType == node.type
                             },
+                            mode = state.nodeModes[nodeId] ?: NodeMode.ALWAYS,
+                            onModeChange = { mode -> viewModel.setNodeMode(nodeId, mode) },
+                            panelNodeId = state.nodePanelNodeId,
+                            panelLoading = state.nodePanelLoading,
+                            panelError = state.nodePanelError,
+                            panelChanged = state.nodePanelChanged,
                             onToggle = {
                                 expandedNodeIds = if (nodeId in expandedNodeIds) expandedNodeIds - nodeId else expandedNodeIds + nodeId
                             },
                             onLongPress = if (node.isOutput) ({ cacheNode = node }) else null,
                             viewModel = viewModel,
                             onHistory = { historyField = it },
+                            onOpenLibrary = { libraryField = it },
+                            onServerPick = { field -> serverPickerField = field },
+                            serverBaseUrl = serverBaseUrl,
                             onUpload = { field ->
                                 uploadField = field
                                 if (field.kind == ParameterKind.VIDEO) {
@@ -944,24 +1143,32 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
     Box(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         if (LocalConfiguration.current.screenWidthDp >= 720) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Card(
+                GlasmioCard(
                     modifier = Modifier.width(174.dp).fillMaxHeight(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
-                    Text("流程目录", Modifier.padding(16.dp), style = MaterialTheme.typography.titleSmall)
-                    LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(nodes, key = { it.first.id }) { (node, _) ->
-                            val active = state.currentExecutingNodeId == node.id
-                            Row(
-                                Modifier.fillMaxWidth().background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        expandedNodeIds = expandedNodeIds + node.id
-                                        parameterScope.launch { kotlinx.coroutines.delay(80); nodeRequesters[node.id]?.bringIntoView() }
-                                    }.padding(horizontal = 10.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text("${node.order + 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                Text(node.title.ifBlank { node.type }, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.fillMaxHeight()) {
+                        Text("流程目录", Modifier.padding(16.dp), style = MaterialTheme.typography.titleSmall)
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            items(nodes, key = { it.first.id }) { (node, _) ->
+                                val active = state.currentExecutingNodeId == node.id
+                                Row(
+                                    Modifier.fillMaxWidth().background(
+                                        if (active) glasmioColors().accent.copy(alpha = 0.14f) else Color.Transparent,
+                                        glasmioShapes().medium,
+                                    )
+                                        .clickable {
+                                            expandedNodeIds = expandedNodeIds + node.id
+                                            parameterScope.launch { kotlinx.coroutines.delay(80); nodeRequesters[node.id]?.bringIntoView() }
+                                        }.padding(horizontal = 10.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text("${node.order + 1}", style = MaterialTheme.typography.labelMedium, color = glasmioColors().accent)
+                                    Text(node.title.ifBlank { node.type }, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
@@ -999,7 +1206,41 @@ private fun ParameterScreen(state: AppUiState, viewModel: MainViewModel) {
             viewModel::dismissWorkflowOverwrite,
         ) { viewModel.saveWorkflow(force = true) }
     }
-    if (historyField != null) PromptHistoryDialog(historyField!!, state, viewModel) { historyField = null }
+    if (historyField != null) PromptHistoryDialog(historyField, state, viewModel) { historyField = null }
+    if (showLibraryBrowser) PromptHistoryDialog(null, state, viewModel) { showLibraryBrowser = false }
+    if (libraryField != null) {
+        val target = libraryField
+        PromptLibrarySheet(
+            store = promptLibraryStore,
+            onDismiss = { libraryField = null },
+            onConfirmed = { entries ->
+                libraryField = null
+                if (target != null && entries.isNotEmpty()) {
+                    viewModel.updateField(target.key, PromptLibrarySelection.join(entries))
+                }
+            },
+        )
+    }
+    serverPickerField?.let { field ->
+        ServerAssetPickerSheet(
+            client = serverAssetsClient,
+            baseUrl = serverBaseUrl,
+            onDismiss = { serverPickerField = null },
+            onPicked = { asset ->
+                val value = ServerGalleryMerge.loadImageValue(
+                    asset.assetTag()?.toTagValue() ?: "input",
+                    asset.subFolder(),
+                    asset.fileName(),
+                )
+                if (field.kind == ParameterKind.IMAGE_LIST) {
+                    viewModel.updateField(field.key, ImageListValue.append(field.displayValue, listOf(value)))
+                } else {
+                    viewModel.updateField(field.key, value)
+                }
+                serverPickerField = null
+            },
+        )
+    }
     if (layoutDialog) LayoutDialog(state.fields, viewModel) { layoutDialog = false }
     if (saveAsDialog) {
         SaveWorkflowAsDialog(
@@ -1050,10 +1291,19 @@ private fun NodeParameterCard(
     active: Boolean,
     problems: List<String>,
     cached: Boolean,
+    mode: NodeMode,
+    onModeChange: (NodeMode) -> Unit,
+    panelNodeId: String?,
+    panelLoading: Boolean,
+    panelError: String?,
+    panelChanged: Map<String, String>,
     onToggle: () -> Unit,
     onLongPress: (() -> Unit)?,
     viewModel: MainViewModel,
     onHistory: (ParameterField) -> Unit,
+    onOpenLibrary: (ParameterField) -> Unit,
+    onServerPick: (ParameterField) -> Unit,
+    serverBaseUrl: String,
     onUpload: (ParameterField) -> Unit,
     multilineEditorStates: MutableMap<String, TextFieldValue>,
     onMultilineFocusGained: () -> Unit,
@@ -1064,6 +1314,14 @@ private fun NodeParameterCard(
     LaunchedEffect(active) {
         if (active) {
             kotlinx.coroutines.delay(50)
+            bringIntoViewRequester.bringIntoView()
+        }
+    }
+    // 展开后参数区会出现在卡片下方，窄屏上这时它已经在可视区之外，
+    // 所以展开时把卡片滚进可视区，用户不用再手动下滑才能看到参数。
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            kotlinx.coroutines.delay(80)
             bringIntoViewRequester.bringIntoView()
         }
     }
@@ -1079,24 +1337,26 @@ private fun NodeParameterCard(
             .padding(horizontal = 7.dp)
             .bringIntoViewRequester(bringIntoViewRequester),
     ) {
-        OutlinedCard(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(
-                when {
-                    problems.isNotEmpty() -> 2.dp
-                    active -> 3.dp
-                    else -> 1.dp
-                },
-                when {
-                    problems.isNotEmpty() -> MaterialTheme.colorScheme.error
-                    active -> Color(0xFF35C46A)
-                    else -> MaterialTheme.colorScheme.outlineVariant
-                },
-            ),
+        val cardShape = glasmioShapes().large
+        GlasmioGlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = when {
+                        problems.isNotEmpty() -> 2.dp
+                        active -> 3.dp
+                        else -> 1.dp
+                    },
+                    color = when {
+                        problems.isNotEmpty() -> MaterialTheme.colorScheme.error
+                        active -> glasmioAppColors().success
+                        else -> glasmioColors().subtleStroke
+                    },
+                    shape = cardShape,
+                ),
+            shape = cardShape,
         ) {
-            Column {
+            Column(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -1116,9 +1376,14 @@ private fun NodeParameterCard(
                             },
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        if (cached) Text("本地保存白名单", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                        if (cached) Text("本地保存白名单", color = glasmioColors().accent, style = MaterialTheme.typography.labelSmall)
                         if (node.isOutput) Text("长按管理本地保存", style = MaterialTheme.typography.labelSmall)
-                        if (active) Text("正在执行", color = Color(0xFF35C46A), style = MaterialTheme.typography.labelMedium)
+                        if (active) Text("正在执行", color = glasmioAppColors().success, style = MaterialTheme.typography.labelMedium)
+                        NodeModeSelector(
+                            mode = mode,
+                            onModeChange = onModeChange,
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
                     }
                     Spacer(Modifier.width(6.dp))
                     Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "收起" else "展开")
@@ -1127,22 +1392,54 @@ private fun NodeParameterCard(
                 }
                 if (expanded) {
                     HorizontalDivider()
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         problems.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { viewModel.openNodePanel(node.id) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("打开节点面板")
+                            }
+                            if (panelNodeId == node.id) {
+                                Text(
+                                    when {
+                                        panelLoading -> "正在打开…"
+                                        panelError != null -> panelError
+                                        panelChanged.isNotEmpty() -> "面板已回写 ${panelChanged.size} 项参数"
+                                        else -> "面板已就绪"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (panelError != null) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
                         if (fields.isEmpty()) {
                             Text("此部件没有可调整参数。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (fields.isNotEmpty()) {
+                            // Nested opaque group inside the glass card: a second glass layer would
+                            // sample the page backdrop instead of the card, so this stays a plain
+                            // tinted surface driven by the Glasmio tokens.
                             Surface(
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(12.dp),
+                                color = glasmioColors().elevatedBackground,
+                                shape = glasmioShapes().medium,
                             ) {
-                                Column(Modifier.padding(horizontal = 2.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     fields.forEachIndexed { index, field ->
                                         ParameterEditor(
                                             field,
                                             viewModel,
                                             onHistory = { onHistory(field) },
+                                            onOpenLibrary = { onOpenLibrary(field) },
+                                            onServerPick = { onServerPick(field) },
+                                            serverBaseUrl = serverBaseUrl,
                                             onUpload = { onUpload(field) },
                                             multilineEditorStates = multilineEditorStates,
                                             onMultilineFocusGained = onMultilineFocusGained,
@@ -1208,7 +1505,7 @@ private fun ConnectionMarkerDashes(
                 Box(
                     Modifier.width(14.dp).height(3.dp).background(
                         connectionMarkerColor(marker.color),
-                        RoundedCornerShape(2.dp),
+                        glasmioShapes().extraSmall,
                     ),
                 )
             }
@@ -1216,14 +1513,24 @@ private fun ConnectionMarkerDashes(
     }
 }
 
+/**
+ * Resolves a connection marker colour supplied by the ComfyUI server.
+ *
+ * The server value is parsed at runtime. The fallback is the Glasmio tertiary content colour so
+ * an unparsable value still follows the light / dark theme instead of a fixed grey.
+ */
+@Composable
 private fun connectionMarkerColor(value: String): Color =
-    runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrDefault(Color(0xFF9E9E9E))
+    runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrDefault(glasmioColors().tertiaryContent)
 
 @Composable
 private fun ParameterEditor(
     field: ParameterField,
     viewModel: MainViewModel,
     onHistory: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onServerPick: () -> Unit,
+    serverBaseUrl: String,
     onUpload: () -> Unit,
     multilineEditorStates: MutableMap<String, TextFieldValue>,
     onMultilineFocusGained: () -> Unit,
@@ -1240,8 +1547,13 @@ private fun ParameterEditor(
                     Text(field.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (field.kind == ParameterKind.MULTILINE) IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.History, "历史", modifier = Modifier.size(20.dp))
+            if (field.kind == ParameterKind.MULTILINE) {
+                IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.History, "历史", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenLibrary, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.LibraryBooks, "提示词库", modifier = Modifier.size(20.dp))
+                }
             }
         }
         if (field.linked) Text("已由其他部件连接，当前值只读", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
@@ -1254,40 +1566,108 @@ private fun ParameterEditor(
             ParameterKind.INTEGER, ParameterKind.DECIMAL -> {
                 NumberField(field, viewModel)
                 field.actions.forEach { action ->
-                    FilledTonalButton(
+                    GlasmioSecondaryButton(
                         onClick = { viewModel.invokeSeedAction(action) },
                         enabled = !field.linked && action.enabled,
-                    ) { Text(action.label) }
+                        text = action.label,
+                    )
                 }
             }
             ParameterKind.IMAGE, ParameterKind.VIDEO -> {
-                OutlinedTextField(
-                    field.displayValue,
-                    { viewModel.updateField(field.key, it) },
-                    Modifier.fillMaxWidth(),
+                GlasmioTextInput(
+                    value = field.displayValue,
+                    onValueChange = { viewModel.updateField(field.key, it) },
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !field.linked,
-                    singleLine = true,
                 )
-                FilledTonalButton(onClick = onUpload, enabled = !field.linked) {
-                    Icon(if (field.kind == ParameterKind.VIDEO) Icons.Default.VideoFile else Icons.Default.UploadFile, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (field.kind == ParameterKind.VIDEO) "从视频相册选择并上传" else "从相册选择并上传")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onUpload, enabled = !field.linked) {
+                        Icon(if (field.kind == ParameterKind.VIDEO) Icons.Default.VideoFile else Icons.Default.UploadFile, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (field.kind == ParameterKind.VIDEO) "从视频相册选择并上传" else "从相册选择并上传")
+                    }
+                    if (field.kind == ParameterKind.IMAGE) {
+                        FilledTonalButton(onClick = onServerPick, enabled = !field.linked && serverBaseUrl.isNotBlank()) {
+                            Icon(Icons.Default.CloudDownload, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("服务器选图")
+                        }
+                    }
+                }
+                if (field.kind == ParameterKind.IMAGE) {
+                    ServerImagePreview(serverBaseUrl, field.displayValue)
                 }
             }
-            ParameterKind.IMAGE_LIST -> ImageListField(field, viewModel, onUpload)
+            ParameterKind.IMAGE_LIST -> {
+                ImageListField(field, viewModel, onUpload)
+                FilledTonalButton(onClick = onServerPick, enabled = !field.linked && serverBaseUrl.isNotBlank()) {
+                    Icon(Icons.Default.CloudDownload, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("服务器选图")
+                }
+                ImageListPreview(serverBaseUrl, field.displayValue)
+            }
             ParameterKind.MULTILINE -> MultilineTextField(
                 field,
                 viewModel,
                 multilineEditorStates,
                 onFocusGained = onMultilineFocusGained,
             )
-            ParameterKind.TEXT -> OutlinedTextField(
-                field.displayValue,
-                { viewModel.updateField(field.key, it) },
-                Modifier.fillMaxWidth(),
+            ParameterKind.TEXT -> GlasmioTextInput(
+                value = field.displayValue,
+                onValueChange = { viewModel.updateField(field.key, it) },
+                modifier = Modifier.fillMaxWidth(),
                 enabled = !field.linked,
             )
             ParameterKind.UNSUPPORTED -> Text(field.warning ?: "此控件需在高级编辑中修改", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** 服务器图片字段的缩略预览：字段值能解析成服务器文件时才显示。 */
+@Composable
+private fun ServerImagePreview(baseUrl: String, value: String) {
+    if (baseUrl.isBlank()) return
+    val ref = ServerGalleryMerge.parseImageValue(value) ?: return
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ServerImageThumb(
+            baseUrl = baseUrl,
+            filename = ref.filename,
+            subfolder = ref.subfolder,
+            type = ref.type,
+            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+            contentDescription = ref.filename,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(ref.filename, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                "服务器 ${ref.type} 目录${if (ref.subfolder.isBlank()) "" else " · ${ref.subfolder}"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** 多图字段的缩略预览。 */
+@Composable
+private fun ImageListPreview(baseUrl: String, value: String) {
+    if (baseUrl.isBlank()) return
+    val items = ImageListValue.parse(value).orEmpty()
+    if (items.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.take(6).forEach { item ->
+            val ref = ServerGalleryMerge.parseImageValue(item) ?: return@forEach
+            ServerImageThumb(
+                baseUrl = baseUrl,
+                filename = ref.filename,
+                subfolder = ref.subfolder,
+                type = ref.type,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                contentDescription = ref.filename,
+            )
         }
     }
 }
@@ -1315,12 +1695,11 @@ private fun ComboField(field: ParameterField, viewModel: MainViewModel) {
 
 @Composable
 private fun NumberField(field: ParameterField, viewModel: MainViewModel) {
-    OutlinedTextField(
+    GlasmioTextInput(
         value = field.displayValue,
         onValueChange = { viewModel.updateField(field.key, it) },
         modifier = Modifier.fillMaxWidth(),
         enabled = !field.linked,
-        singleLine = true,
     )
 }
 
@@ -1387,16 +1766,16 @@ private fun ParameterHistoryScreen(state: AppUiState, viewModel: MainViewModel) 
         )
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (recentWorkflows.isEmpty()) {
-            OutlinedCard(Modifier.fillMaxWidth()) {
+            GlasmioCard(Modifier.fillMaxWidth()) {
                 Text(
                     "暂无历史记录，请先在工作流页打开一个工作流。",
-                    Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    color = glasmioColors().secondaryContent,
                 )
             }
         } else {
             recentWorkflows.forEach { entry ->
-                OutlinedCard(
+                GlasmioCard(
                     Modifier.fillMaxWidth().clickable {
                         viewModel.selectWorkflow(entry, recordAsOpened = true)
                     },
@@ -1406,13 +1785,13 @@ private fun ParameterHistoryScreen(state: AppUiState, viewModel: MainViewModel) 
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.History, null, tint = glasmioColors().accent)
                         Column(Modifier.weight(1f)) {
                             Text(entry.name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
                             Text(
                                 entry.path.substringBeforeLast('/', "workflows"),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = glasmioColors().secondaryContent,
                                 maxLines = 1,
                             )
                         }
@@ -1424,28 +1803,93 @@ private fun ParameterHistoryScreen(state: AppUiState, viewModel: MainViewModel) 
     }
 }
 
+/**
+ * 文本历史 / 提示词库对话框。
+ *
+ * @param field 目标字段。为 null 时进入浏览模式：只做搜索、收藏、删除、复制，
+ *        不会把内容回写到任何字段。
+ */
 @Composable
-private fun PromptHistoryDialog(field: ParameterField, state: AppUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
+private fun PromptHistoryDialog(field: ParameterField?, state: AppUiState, viewModel: MainViewModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val libraryEntries = remember(state.promptLibrary, query) {
+        viewModel.promptLibraryEntries(query, null)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("文本历史（${state.promptHistory.size}/50）") },
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
+        title = {
+            Text(
+                if (field == null) {
+                    "提示词库（${state.promptLibrary.size}）"
+                } else {
+                    "文本历史（${state.promptHistory.size}/${PromptHistory.MAX_SIZE}）"
+                },
+            )
+        },
         text = {
             Column {
                 OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索") })
-                LazyColumn(Modifier.fillMaxHeight(0.6f)) {
-                    items(state.promptHistory.filter { query.isBlank() || it.contains(query, true) }) { value ->
-                        Row(Modifier.fillMaxWidth().clickable { viewModel.updateField(field.key, value); onDismiss() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(value, Modifier.weight(1f), maxLines = 3)
-                            IconButton(onClick = { viewModel.removePromptHistory(value) }) { Icon(Icons.Default.Delete, "删除") }
+                if (field == null) {
+                    LazyColumn(Modifier.fillMaxHeight(0.6f)) {
+                        items(libraryEntries, key = { it.id }) { entry ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.text, maxLines = 3)
+                                    Text(
+                                        "${entry.category} · 用过 ${entry.useCount} 次",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                IconButton(onClick = {
+                                    clipboard.setText(AnnotatedString(entry.text))
+                                }) { Icon(Icons.Default.ContentCopy, "复制") }
+                                IconButton(
+                                    onClick = {
+                                        if (entry.pinned) viewModel.unpinPrompt(entry.id) else viewModel.pinPrompt(entry.id)
+                                    },
+                                ) {
+                                    Icon(
+                                        if (entry.pinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                        if (entry.pinned) "取消收藏" else "收藏",
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.removePrompt(entry.id) }) {
+                                    Icon(Icons.Default.Delete, "删除")
+                                }
+                            }
+                            HorizontalDivider()
                         }
-                        HorizontalDivider()
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxHeight(0.6f)) {
+                        items(state.promptHistory.filter { query.isBlank() || it.contains(query, true) }) { value ->
+                            Row(Modifier.fillMaxWidth().clickable { viewModel.updateField(field.key, value); onDismiss() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(value, Modifier.weight(1f), maxLines = 3)
+                                IconButton(onClick = { viewModel.removePromptHistory(value) }) { Icon(Icons.Default.Delete, "删除") }
+                            }
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-        dismissButton = { TextButton(onClick = viewModel::clearPromptHistory) { Text("清空") } },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    if (field == null) viewModel.clearPromptLibrary() else viewModel.clearPromptHistory()
+                },
+            ) { Text("清空") }
+        },
     )
 }
 
@@ -1453,12 +1897,20 @@ private fun PromptHistoryDialog(field: ParameterField, state: AppUiState, viewMo
 private fun LayoutDialog(fields: List<ParameterField>, viewModel: MainViewModel, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("参数页布局") },
         text = {
             LazyColumn(Modifier.fillMaxHeight(0.7f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(fields.sortedBy { it.order }, key = { it.key }) { field ->
-                    OutlinedCard {
-                        Column(Modifier.padding(10.dp)) {
+                    // The dialog body lives in its own window, so it stays on Material3 surfaces
+                    // that are driven by the Glasmio tokens instead of glass.
+                    OutlinedCard(
+                        shape = glasmioShapes().medium,
+                        colors = CardDefaults.outlinedCardColors(containerColor = glasmioColors().elevatedBackground),
+                        border = BorderStroke(1.dp, glasmioColors().subtleStroke),
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp)) {
                             OutlinedTextField(field.label, { viewModel.renameField(field.key, it) }, Modifier.fillMaxWidth(), label = { Text(field.name) }, singleLine = true)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("显示", Modifier.weight(1f)); Switch(field.visible, { viewModel.setFieldVisibility(field.key, it) })
@@ -1482,8 +1934,8 @@ private fun LayoutDialog(fields: List<ParameterField>, viewModel: MainViewModel,
 private fun ResultScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    source: ResultSource,
-    onSourceChange: (ResultSource) -> Unit,
+    segment: ResultSegment,
+    onSegmentChange: (ResultSegment) -> Unit,
     layout: ResultLayout,
     onLayoutChange: (ResultLayout) -> Unit,
     selectedAlbumId: String?,
@@ -1494,6 +1946,11 @@ private fun ResultScreen(
     var confirmDeleteSelection by remember { mutableStateOf(false) }
     var galleryItems by remember { mutableStateOf<List<ResultMedia>>(emptyList()) }
     var galleryInitialIndex by remember { mutableIntStateOf(0) }
+    val source = if (segment == ResultSegment.LOCAL) ResultSource.LOCAL else ResultSource.CLOUD
+    val serverBaseUrl = state.activeServer?.baseUrl.orEmpty()
+    val serverAssetsClient = remember { ServerAssetsClient() }
+    // 统一作品列表：服务器历史与手机本地 / 云端作品按文件身份去重后合并。
+    val mergedMedia = remember(state.mergedResults) { state.mergedResults }
     val media = (if (source == ResultSource.LOCAL) state.localResults else state.results)
         .sortedWith(compareByDescending<ResultMedia> { it.createdAt }.thenByDescending { it.taskNumber })
     val albums = media.groupBy { it.jobId }
@@ -1516,7 +1973,19 @@ private fun ResultScreen(
             selectedMedia = item
         }
     }
-    LaunchedEffect(source) { selectedKeys = emptySet() }
+    /** 打开服务器缩略图：复用现有的全屏图片浏览器，列表是统一作品列表。 */
+    fun openServerMedia(item: ResultMedia) {
+        val images = (mergedMedia + item).distinctBy { it.stableKey() }.filter { it.kind == MediaKind.IMAGE }
+        galleryInitialIndex = images.indexOfFirst { it.stableKey() == item.stableKey() }.coerceAtLeast(0)
+        galleryItems = images
+    }
+    LaunchedEffect(segment) { selectedKeys = emptySet() }
+    LaunchedEffect(segment, serverBaseUrl) {
+        if (segment == ResultSegment.SERVER && serverBaseUrl.isNotBlank()) {
+            viewModel.loadServerAssets(reset = true)
+            viewModel.loadServerJobs(reset = true)
+        }
+    }
     LaunchedEffect(media.map(ResultMedia::stableKey)) {
         selectedKeys = selectedKeys.intersect(media.map(ResultMedia::stableKey).toSet())
     }
@@ -1524,9 +1993,9 @@ private fun ResultScreen(
     val resultHeader: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             StudioChoices(
-                labels = listOf("本地作品", "云端作品"),
-                selected = if (source == ResultSource.LOCAL) 0 else 1,
-                onSelect = { onSourceChange(if (it == 0) ResultSource.LOCAL else ResultSource.CLOUD) },
+                labels = listOf("本地作品", "云端作品", "服务器"),
+                selected = segment.ordinal,
+                onSelect = { onSegmentChange(ResultSegment.entries[it]) },
                 modifier = Modifier.padding(top = 12.dp),
             )
             if (!selectionMode) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1535,20 +2004,48 @@ private fun ResultScreen(
                     Text("任务相册", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 } else {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(if (layout == ResultLayout.ALL) "全部作品" else "任务相册", style = MaterialTheme.typography.titleMedium)
-                        Text("${media.size} 项作品 · 长按可多选", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            when (segment) {
+                                ResultSegment.SERVER -> "服务器作品"
+                                else -> if (layout == ResultLayout.ALL) "全部作品" else "任务相册"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            when (segment) {
+                                ResultSegment.SERVER -> "${mergedMedia.size} 项作品 · 服务器图片与历史生成"
+                                else -> "${media.size} 项作品 · 长按可多选"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    IconButton(onClick = { onLayoutChange(if (layout == ResultLayout.ALL) ResultLayout.ALBUMS else ResultLayout.ALL) }) {
-                        Icon(if (layout == ResultLayout.ALL) Icons.Default.PhotoAlbum else Icons.Default.GridView, if (layout == ResultLayout.ALL) "切换到任务相册" else "切换到全部平铺")
+                    if (segment != ResultSegment.SERVER) {
+                        IconButton(onClick = { onLayoutChange(if (layout == ResultLayout.ALL) ResultLayout.ALBUMS else ResultLayout.ALL) }) {
+                            Icon(if (layout == ResultLayout.ALL) Icons.Default.PhotoAlbum else Icons.Default.GridView, if (layout == ResultLayout.ALL) "切换到任务相册" else "切换到全部平铺")
+                        }
                     }
                 }
-                IconButton(onClick = { if (source == ResultSource.LOCAL) viewModel.refreshLocalResults() else viewModel.refreshResults() }) { Icon(Icons.Default.Refresh, "刷新作品") }
+                IconButton(onClick = {
+                    when (segment) {
+                        ResultSegment.LOCAL -> viewModel.refreshLocalResults()
+                        ResultSegment.CLOUD -> viewModel.refreshResults()
+                        ResultSegment.SERVER -> {
+                            viewModel.loadServerAssets(reset = true)
+                            viewModel.loadServerJobs(reset = true)
+                        }
+                    }
+                }) { Icon(Icons.Default.Refresh, "刷新作品") }
             }
             selectedAlbum?.let { Text(albumTitle(it), style = MaterialTheme.typography.titleMedium) }
         }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (selectionMode) Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.padding(top = 8.dp)) {
+        if (selectionMode) Surface(
+            shape = glasmioShapes().large,
+            color = glasmioMaterialColors().primaryContainer,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { selectedKeys = emptySet() }) { Icon(Icons.Default.Close, "退出多选") }
                 Text("已选 ${selectedItems.size} 项", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
@@ -1560,6 +2057,24 @@ private fun ResultScreen(
             }
         }
         when {
+            segment == ResultSegment.SERVER -> Column(Modifier.fillMaxSize()) {
+                resultHeader()
+                if (serverBaseUrl.isBlank()) {
+                    EmptyState(Icons.Default.CloudOff, "尚未连接服务器\n连接后即可浏览服务器图片与历史生成")
+                } else {
+                    ServerGalleryView(
+                        client = serverAssetsClient,
+                        baseUrl = serverBaseUrl,
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenAsset = { asset: ServerAsset ->
+                            openServerMedia(ServerGalleryMerge.assetToMedia(serverBaseUrl, asset))
+                        },
+                        onOpenJobPreview = { job: ServerJob ->
+                            ServerGalleryMerge.jobPreviewToMedia(serverBaseUrl, job)?.let { openServerMedia(it) }
+                        },
+                    )
+                }
+            }
             selectedAlbum != null -> ResultMediaGrid(
                 media = selectedAlbum.media,
                 selectedKeys = selectedKeys,
@@ -1610,6 +2125,8 @@ private fun ResultScreen(
     selectedMedia?.let { item ->
         AlertDialog(
             onDismissRequest = { selectedMedia = null },
+            shape = glasmioShapes().extraLarge,
+            containerColor = glasmioMaterialColors().surfaceContainerHigh,
             title = { Text(item.filename, maxLines = 2) },
             text = {
                 if (item.kind == MediaKind.IMAGE) {
@@ -1682,29 +2199,32 @@ private fun ResultMediaGrid(
         item(key = "results-controls", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { header() }
         gridItems(media, key = { it.stableKey() }) { item ->
             val selected = item.stableKey() in selectedKeys
-            Card(
-                Modifier.fillMaxWidth().combinedClickable(
+            GlasmioCard(
+                modifier = Modifier.fillMaxWidth().combinedClickable(
                     onClick = { if (selectionMode) onToggleSelection(item) else onOpen(item) },
                     onLongClick = { onToggleSelection(item) },
                 ),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
+                // Grid tiles sit next to each other, so sampling would make every tile
+                // refract its neighbours.
+                sampleBackdrop = false,
             ) {
-                Box {
-                    MediaCover(item, Modifier.fillMaxWidth().aspectRatio(1f))
-                    if (selected) {
-                        Box(
-                            Modifier.matchParentSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
-                        )
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            "已选择",
-                            Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
+                Column(Modifier.fillMaxWidth()) {
+                    Box(Modifier.fillMaxWidth()) {
+                        MediaCover(item, Modifier.fillMaxWidth().aspectRatio(1f))
+                        if (selected) {
+                            Box(
+                                Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = 0.22f)),
+                            )
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                "已选择",
+                                Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp),
+                                tint = glasmioColors().accent,
+                            )
+                        }
                     }
+                    Text(item.filename, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
                 }
-                Text(item.filename, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -1721,38 +2241,41 @@ private fun AlbumTile(
     onToggleSelection: () -> Unit,
 ) {
     val cover = album.media.firstOrNull { it.kind == MediaKind.IMAGE } ?: album.media.first()
-    Card(
-        Modifier.fillMaxWidth().combinedClickable(
+    GlasmioCard(
+        modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = { if (selectionMode) onToggleSelection() else onClick() },
             onLongClick = onToggleSelection,
         ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
+        // Gallery tiles sit next to each other, so sampling would make every tile
+        // refract its neighbours.
+        sampleBackdrop = false,
     ) {
-        Box {
-            MediaCover(cover, Modifier.fillMaxWidth().aspectRatio(1.33f))
-            if (selected || partiallySelected) {
-                Box(
-                    Modifier.matchParentSize().background(MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.24f else 0.12f)),
-                )
-                Icon(
-                    Icons.Default.CheckCircle,
-                    if (selected) "已选择整个相册" else "已选择部分作品",
-                    Modifier.align(Alignment.TopEnd).padding(7.dp).size(28.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth()) {
+                MediaCover(cover, Modifier.fillMaxWidth().aspectRatio(1.33f))
+                if (selected || partiallySelected) {
+                    Box(
+                        Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = if (selected) 0.24f else 0.12f)),
+                    )
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        if (selected) "已选择整个相册" else "已选择部分作品",
+                        Modifier.align(Alignment.TopEnd).padding(7.dp).size(28.dp),
+                        tint = glasmioColors().accent,
+                    )
+                }
             }
-        }
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(albumTitle(album), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    album.media.maxOfOrNull(ResultMedia::createdAt)?.takeIf { it > 0L }?.let { formatTime(it).substring(5, 16) }.orEmpty(),
-                    maxLines = 1,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("${album.media.size} 项", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(albumTitle(album), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        album.media.maxOfOrNull(ResultMedia::createdAt)?.takeIf { it > 0L }?.let { formatTime(it).substring(5, 16) }.orEmpty(),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("${album.media.size} 项", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
@@ -1764,12 +2287,12 @@ private fun MediaCover(media: ResultMedia, modifier: Modifier = Modifier) {
         AsyncImage(
             model = previewUrl(media),
             contentDescription = media.filename,
-            modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+            modifier = modifier.background(glasmioColors().elevatedBackground),
             contentScale = ContentScale.Crop,
         )
     } else {
-        Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.VideoFile, "视频", Modifier.size(42.dp), tint = MaterialTheme.colorScheme.primary)
+        Box(modifier.background(glasmioColors().elevatedBackground), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.VideoFile, "视频", Modifier.size(42.dp), tint = glasmioColors().accent)
         }
     }
 }
@@ -1834,7 +2357,7 @@ private fun ImageGalleryViewer(
                         shape = CircleShape,
                     ) {
                         IconButton(onClick = { pagerScope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } }) {
-                            Icon(Icons.Default.ChevronLeft, "上一张", tint = Color.White, modifier = Modifier.size(34.dp))
+                            Icon(Icons.Default.ChevronLeft, "上一张", tint = AppShellMediaChromeColor, modifier = Modifier.size(34.dp))
                         }
                     }
                 }
@@ -1845,7 +2368,7 @@ private fun ImageGalleryViewer(
                         shape = CircleShape,
                     ) {
                         IconButton(onClick = { pagerScope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } }) {
-                            Icon(Icons.Default.ChevronRight, "下一张", tint = Color.White, modifier = Modifier.size(34.dp))
+                            Icon(Icons.Default.ChevronRight, "下一张", tint = AppShellMediaChromeColor, modifier = Modifier.size(34.dp))
                         }
                     }
                 }
@@ -1857,21 +2380,21 @@ private fun ImageGalleryViewer(
                             .padding(horizontal = 8.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭", tint = Color.White) }
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭", tint = AppShellMediaChromeColor) }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 current.createdAt.takeIf { it > 0L }?.let(::formatTime) ?: current.filename,
-                                color = Color.White,
+                                color = AppShellMediaChromeColor,
                                 maxLines = 1,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Text(
                                 "单击沉浸 · 双击缩放 · 左右换图",
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = AppShellMediaChromeColor.copy(alpha = 0.72f),
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         }
-                        Text("${pagerState.currentPage + 1}/${items.size}", color = Color.White)
+                        Text("${pagerState.currentPage + 1}/${items.size}", color = AppShellMediaChromeColor)
                     }
                     Row(
                         Modifier.fillMaxWidth().align(Alignment.BottomCenter)
@@ -1884,7 +2407,7 @@ private fun ImageGalleryViewer(
                         GalleryAction(
                             if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             if (isFavorite) "已收藏" else "收藏",
-                            tint = if (isFavorite) Color(0xFFFF5A6F) else Color.White,
+                            tint = if (isFavorite) glasmioAppColors().danger else AppShellMediaChromeColor,
                         ) { onFavorite(current) }
                         GalleryAction(
                             if (current.source == ResultSource.CLOUD) Icons.Default.Download else Icons.Default.Save,
@@ -1908,8 +2431,8 @@ private fun ImageGalleryViewer(
                                 Modifier.fillMaxWidth().clickable { moreExpanded = true }.padding(vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Icon(Icons.Default.MoreHoriz, "更多", tint = Color.White)
-                                Text("更多", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                Icon(Icons.Default.MoreHoriz, "更多", tint = AppShellMediaChromeColor)
+                                Text("更多", color = AppShellMediaChromeColor, style = MaterialTheme.typography.labelSmall)
                             }
                             DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
                                 DropdownMenuItem(
@@ -1942,9 +2465,9 @@ private fun ImageGalleryViewer(
                     Surface(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (chromeVisible) 72.dp else 20.dp),
                         color = Color.Black.copy(alpha = 0.78f),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = glasmioShapes().large,
                     ) {
-                        Text(message, color = Color.White, modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp))
+                        Text(message, color = AppShellMediaChromeColor, modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp))
                     }
                 }
             }
@@ -1962,6 +2485,8 @@ private fun ImageGalleryViewer(
     if (showInfo) {
         AlertDialog(
             onDismissRequest = { showInfo = false },
+            shape = glasmioShapes().extraLarge,
+            containerColor = glasmioMaterialColors().surfaceContainerHigh,
             title = { Text("文件信息") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1986,7 +2511,7 @@ private fun RowScope.GalleryAction(
     icon: ImageVector,
     label: String,
     enabled: Boolean = true,
-    tint: Color = Color.White,
+    tint: Color = AppShellMediaChromeColor,
     onClick: () -> Unit,
 ) {
     Column(
@@ -2101,7 +2626,9 @@ private fun BackendScreen(state: AppUiState, viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "backend-connection") {
-            Box(Modifier.padding(top = 12.dp)) { BackendConnectionCard(state, viewModel::refreshOrReconnect) }
+            Box(Modifier.padding(top = 12.dp)) {
+                BackendConnectionCard(state, viewModel::refreshOrReconnect, state.serverCapabilities)
+            }
         }
         item(key = "task-filter") {
             StudioChoices(listOf("全部任务", "本 App 任务"), if (appOnly) 1 else 0, { appOnly = it == 1 })
@@ -2112,7 +2639,7 @@ private fun BackendScreen(state: AppUiState, viewModel: MainViewModel) {
                     Text("任务记录", style = MaterialTheme.typography.titleMedium)
                     Text("运行 ${jobs.count { it.state == JobState.RUNNING }} · 等待 ${jobs.count { it.state == JobState.PENDING }} · 已结束 ${jobs.count { it.state in setOf(JobState.SUCCESS, JobState.ERROR, JobState.CANCELLED) }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = { confirmClear = true }, enabled = pending > 0) { Text("清空等待") }
+                GlasmioSecondaryButton(onClick = { confirmClear = true }, enabled = pending > 0, text = "清空等待")
                 IconButton(onClick = viewModel::refreshTasks) { Icon(Icons.Default.Refresh, "刷新任务") }
             }
         }
@@ -2135,38 +2662,41 @@ private fun JobCard(job: JobSummary, viewModel: MainViewModel, tracked: Boolean)
     val statusColor = when (job.state) {
         JobState.ERROR -> MaterialTheme.colorScheme.error
         JobState.SUCCESS -> MaterialTheme.colorScheme.secondary
-        JobState.CANCELLED, JobState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-        else -> MaterialTheme.colorScheme.primary
+        JobState.CANCELLED, JobState.UNKNOWN -> glasmioColors().secondaryContent
+        else -> glasmioColors().accent
     }
-    Card(
+    GlasmioCard(
         Modifier.fillMaxWidth().clickable(enabled = trackable) { viewModel.takeoverJob(job) },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = if (tracked) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(job.workflowName.ifBlank { "服务器任务" }.removeSuffix(".json"), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("任务 ${job.id.take(8)}${if (job.submittedByApp) " · 本 App 提交" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                StudioBadge(when (job.state) {
-                    JobState.RUNNING -> "运行中"
-                    JobState.PENDING -> "等待中"
-                    JobState.SUCCESS -> "已完成"
-                    JobState.ERROR -> "失败"
-                    JobState.CANCELLED -> "已取消"
-                    JobState.UNKNOWN -> "历史"
-                }, color = statusColor)
+        Box(Modifier.fillMaxWidth()) {
+            if (tracked) {
+                Box(Modifier.matchParentSize().background(glasmioColors().accent.copy(alpha = 0.10f)))
             }
-            job.progress?.let { LinearProgressIndicator(progress = { it.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
-            if (tracked || trackable) Text(
-                if (tracked) "正在跟踪 · 点击查看参数" else "点击接管并查看对应工作流",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
-            )
-            job.currentNode?.let { Text("执行部件：$it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (trackable || (job.durationMillis ?: 0L) > 0L) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(job.durationMillis?.takeIf { it > 0 }?.let { "耗时 ${formatDuration(it)}" }.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                if (trackable) TextButton(onClick = { confirmCancel = true }) { Text("取消任务", color = MaterialTheme.colorScheme.error) }
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(job.workflowName.ifBlank { "服务器任务" }.removeSuffix(".json"), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("任务 ${job.id.take(8)}${if (job.submittedByApp) " · 本 App 提交" else ""}", style = MaterialTheme.typography.bodySmall, color = glasmioColors().secondaryContent)
+                    }
+                    StudioBadge(when (job.state) {
+                        JobState.RUNNING -> "运行中"
+                        JobState.PENDING -> "等待中"
+                        JobState.SUCCESS -> "已完成"
+                        JobState.ERROR -> "失败"
+                        JobState.CANCELLED -> "已取消"
+                        JobState.UNKNOWN -> "历史"
+                    }, color = statusColor)
+                }
+                job.progress?.let { LinearProgressIndicator(progress = { it.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
+                if (tracked || trackable) Text(
+                    if (tracked) "正在跟踪 · 点击查看参数" else "点击接管并查看对应工作流",
+                    style = MaterialTheme.typography.bodySmall, color = glasmioColors().accent,
+                )
+                job.currentNode?.let { Text("执行部件：$it", style = MaterialTheme.typography.bodySmall, color = glasmioColors().secondaryContent) }
+                if (trackable || (job.durationMillis ?: 0L) > 0L) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(job.durationMillis?.takeIf { it > 0 }?.let { "耗时 ${formatDuration(it)}" }.orEmpty(), style = MaterialTheme.typography.bodySmall, color = glasmioColors().secondaryContent, modifier = Modifier.weight(1f))
+                    if (trackable) TextButton(onClick = { confirmCancel = true }) { Text("取消任务", color = glasmioAppColors().danger) }
+                }
             }
         }
     }
@@ -2181,12 +2711,12 @@ private fun JobCard(job: JobSummary, viewModel: MainViewModel, tracked: Boolean)
 private fun EmptyState(icon: ImageVector, message: String) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 440.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(68.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
-                Icon(icon, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+            GlasmioCard(modifier = Modifier.size(68.dp)) {
+                Icon(icon, null, Modifier.size(30.dp).align(Alignment.Center), tint = glasmioColors().accent)
             }
             Text(message.substringBefore('\n'), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             message.substringAfter('\n', "").takeIf { it.isNotBlank() }?.let {
-                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                Text(it, color = glasmioColors().secondaryContent, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
             }
         }
     }
@@ -2197,6 +2727,8 @@ private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, on
     var value by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text(title) },
         text = { OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), label = { Text("名称") }, singleLine = true) },
         confirmButton = { TextButton(onClick = { onConfirm(value) }, enabled = value.isNotBlank()) { Text("确定") } },
@@ -2217,6 +2749,8 @@ private fun SaveWorkflowAsDialog(
     var folderMenuExpanded by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("工作流另存为") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2284,6 +2818,8 @@ private fun MoveWorkflowDialog(
     var folder by remember(initialFolder) { mutableStateOf(initialFolder) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("选择目标文件夹") },
         text = {
             LazyColumn(
@@ -2293,13 +2829,15 @@ private fun MoveWorkflowDialog(
                 items(folders, key = { it }) { option ->
                     OutlinedCard(
                         modifier = Modifier.fillMaxWidth().clickable { folder = option },
+                        shape = glasmioShapes().medium,
                         colors = CardDefaults.outlinedCardColors(
                             containerColor = if (option == folder) {
-                                MaterialTheme.colorScheme.primaryContainer
+                                glasmioMaterialColors().primaryContainer
                             } else {
-                                MaterialTheme.colorScheme.surface
+                                glasmioColors().elevatedBackground
                             },
                         ),
+                        border = BorderStroke(1.dp, glasmioColors().subtleStroke),
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
@@ -2339,7 +2877,7 @@ private fun ImageListField(field: ParameterField, viewModel: MainViewModel, onUp
         Text("尚未添加参考图；不添加时仍可作为纯文本生成", style = MaterialTheme.typography.bodySmall)
     } else {
         images.forEachIndexed { index, path ->
-            OutlinedCard(Modifier.fillMaxWidth()) {
+            GlasmioCard(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2390,15 +2928,17 @@ private fun ImageListField(field: ParameterField, viewModel: MainViewModel, onUp
             Text("选择多张并上传")
         }
         if (!images.isNullOrEmpty()) {
-            OutlinedButton(
+            GlasmioSecondaryButton(
                 onClick = { viewModel.updateField(field.key, "[]") },
                 enabled = !field.linked,
-            ) { Text("清空") }
+                text = "清空",
+            )
         } else if (images == null) {
-            OutlinedButton(
+            GlasmioSecondaryButton(
                 onClick = { viewModel.updateField(field.key, "[]") },
                 enabled = !field.linked,
-            ) { Text("重置") }
+                text = "重置",
+            )
         }
     }
     Text("顺序会传给 Qwen：第 1 张是主图，提示词可用 <image1>、<image2>…引用", style = MaterialTheme.typography.labelSmall)
@@ -2413,6 +2953,8 @@ private fun WorkflowDraftConflictDialog(
 ) {
     AlertDialog(
         onDismissRequest = onKeepLocal,
+        shape = glasmioShapes().extraLarge,
+        containerColor = glasmioMaterialColors().surfaceContainerHigh,
         title = { Text("本地草稿与服务器版本冲突") },
         text = { Text(message) },
         confirmButton = {
@@ -2435,12 +2977,15 @@ private fun ConfirmDialog(
     confirmLabel: String = "确认",
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    // The Glasmio alert threads the backdrop explicitly, so it stays safe inside its own window.
+    GlasmioAlertDialog(
+        visible = true,
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = title,
+        message = message,
+        confirmText = confirmLabel,
+        dismissText = "取消",
+        onConfirm = onConfirm,
     )
 }
 

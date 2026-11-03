@@ -10,7 +10,7 @@
 
 ## 构建 Debug
 
-要求 JDK 17、Android SDK 36，项目最低 Android 8.0。用 Android Studio 导入，或创建不跟踪的 `local.properties` 指向你的 SDK 后执行：
+要求 JDK 21（AGP 9 要求）、Android SDK 37（compileSdk 37），项目最低 Android 13（minSdk 33）。用 Android Studio 导入，或创建不跟踪的 `local.properties` 指向你的 SDK 后执行：
 
 ```powershell
 .\gradlew.bat testDebugUnitTest assembleDebug

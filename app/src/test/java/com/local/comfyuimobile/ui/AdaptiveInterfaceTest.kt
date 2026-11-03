@@ -372,12 +372,15 @@ class AdaptiveInterfaceTest {
             ) + if (longContent) (1..24).map { JobSummary("extra-$it", JobState.SUCCESS, workflowName = "后台任务 $it") } else emptyList(),
         ))
         activity.setContent {
-            ComfyMobileTheme {
+            ComfyMobileTheme(liquidGlassEnabled = false) {
                 var settingsOpen by remember { mutableStateOf(false) }
-                Box {
-                    if (connected) ConnectedApp(state, viewModel, snackbar) { settingsOpen = true }
-                    else ConnectionScreen(state, snackbar, { settings = true }, {}, { connectedAddress = it }, { scans++ }, {})
-                    if (settingsOpen) SettingsScreen(state, viewModel, snackbar) { settingsOpen = false }
+                // The glass material never idles under Robolectric, so the harness stays unhosted.
+                GlasmioTestHost {
+                    Box {
+                        if (connected) ConnectedApp(state, viewModel, snackbar) { settingsOpen = true }
+                        else ConnectionScreen(state, snackbar, { settings = true }, {}, { connectedAddress = it }, { scans++ }, {})
+                        if (settingsOpen) SettingsScreen(state, viewModel, snackbar) { settingsOpen = false }
+                    }
                 }
             }
         }

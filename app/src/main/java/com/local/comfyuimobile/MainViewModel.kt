@@ -15,11 +15,19 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.local.comfyuimobile.bridge.ComfyBridge
 import com.local.comfyuimobile.bridge.AdvancedEditorSession
+import com.local.comfyuimobile.bridge.NodeModePolicy
 import com.local.comfyuimobile.bridge.WorkflowImageReader
 import com.local.comfyuimobile.bridge.ImageMetadataReader
 import com.local.comfyuimobile.bridge.ImageGenerationMetadata
+import com.local.comfyuimobile.data.NodeModeChange
+import com.local.comfyuimobile.data.NodeModeState
+import com.local.comfyuimobile.data.PromptEntry
+import com.local.comfyuimobile.data.PromptLibraryLogic
+import com.local.comfyuimobile.data.PromptLibrarySelection
+import com.local.comfyuimobile.data.PromptLibraryStore
 import com.local.comfyuimobile.data.ResultParameters
 import com.local.comfyuimobile.data.ResultParameterReport
+import com.local.comfyuimobile.data.ServerAssetPagination
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.local.comfyuimobile.bridge.ImageListValue
 import com.local.comfyuimobile.data.AppPreferences
@@ -36,21 +44,33 @@ import com.local.comfyuimobile.data.WorkflowWorkingCopy
 import com.local.comfyuimobile.model.AppUiState
 import com.local.comfyuimobile.model.AppDestination
 import com.local.comfyuimobile.model.AppNavigationRequest
+import com.local.comfyuimobile.model.AssetTag
 import com.local.comfyuimobile.model.CacheOutputRule
 import com.local.comfyuimobile.model.ConnectionStatus
 import com.local.comfyuimobile.model.JobState
 import com.local.comfyuimobile.model.JobSummary
 import com.local.comfyuimobile.model.MediaKind
+import com.local.comfyuimobile.model.NodeMode
 import com.local.comfyuimobile.model.ParameterField
 import com.local.comfyuimobile.model.ParameterKind
 import com.local.comfyuimobile.model.ParameterSection
 import com.local.comfyuimobile.model.ResultMedia
+import com.local.comfyuimobile.model.ServerAsset
+import com.local.comfyuimobile.model.ServerJob
 import com.local.comfyuimobile.model.WorkflowDocument
 import com.local.comfyuimobile.model.WorkflowEntry
 import com.local.comfyuimobile.model.WorkflowNode
 import com.local.comfyuimobile.network.ActiveJobRecovery
 import com.local.comfyuimobile.network.TaskLifecycle
 import com.local.comfyuimobile.network.ComfyClient
+import com.local.comfyuimobile.network.ConnectionFailure
+import com.local.comfyuimobile.network.ServerAssetsClient
+import com.local.comfyuimobile.network.ServerAssetsDisabledException
+import com.local.comfyuimobile.network.ServerCapabilities
+import com.local.comfyuimobile.network.ServerCapabilitiesClient
+import com.local.comfyuimobile.network.UnsupportedEndpointException
+import com.local.comfyuimobile.network.classifyFailure
+import com.local.comfyuimobile.network.diagnose
 import com.local.comfyuimobile.network.ExecutionNodeResolver
 import com.local.comfyuimobile.network.LanAddress
 import com.local.comfyuimobile.network.LanScanner
@@ -95,6 +115,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val client = ComfyClient(File(application.cacheDir, "original-downloads"))
     private val scanner = LanScanner(application, client)
     private val updates = UpdateManager(application)
+    private val serverAssetsClient = ServerAssetsClient()
+    private val promptLibraryStore = PromptLibraryStore(application)
     private val clientId = application
         .getSharedPreferences("comfy_mobile_runtime", android.content.Context.MODE_PRIVATE)
         .let { store ->
@@ -128,6 +150,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var updateCleanupJob: Job? = null
     private val taskRefreshMutex = Mutex()
     private val completionMessages = ConcurrentHashMap<String, String>()
+    private var serverAssetOffset = 0
+    private var serverJobOffset = 0
+    private var serverAssetsJob: Job? = null
+    private var serverJobsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -165,6 +191,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         favoriteResultKeys = stored.favoriteResultKeys,
                         recentWorkflowPaths = stored.recentWorkflows,
                         serverInput = resolvedServerInput,
+                        pinnedServerUrls = stored.pinnedServerUrls,
                     )
                 }
                 if (submittedJobsChanged && _state.value.activeServer != null) {
@@ -182,6 +209,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val cached = localResultCache.load()
             _state.update { it.copy(localResults = cached) }
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(promptLibraryLoading = true) }
+            runCatching { promptLibraryStore.load() }
+                .onSuccess { entries -> _state.update { it.copy(promptLibrary = entries, promptLibraryLoading = false) } }
+                .onFailure { error ->
+                    AppLogger.error("读取提示词库失败", error)
+                    _state.update { it.copy(promptLibraryLoading = false) }
+                }
         }
         updateCleanupJob = viewModelScope.launch {
             runCatching { updates.cleanupObsoletePackages() }
@@ -251,6 +287,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setServerInput(value: String) = _state.update { it.copy(serverInput = value) }
     fun clearMessage() = _state.update { it.copy(error = null, notice = null) }
 
+    /** 在界面上提示一条消息（走统一的 snackbar 通道）。 */
+    fun postNotice(message: String) {
+        _state.update { it.copy(notice = message, error = null) }
+    }
+
     fun openAdvancedEditor() {
         if (_state.value.loading || _state.value.generating || generationJob?.isActive == true) return
         if (!_state.value.bridgeReady) return
@@ -312,7 +353,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         client.closeWebSocket()
         networkChangedDuringConnect.set(false)
         connectionJob = viewModelScope.launch {
-            runOperation("连接失败") {
+            runOperation("连接失败", onError = { error ->
+                applyConnectionDiagnosis(requestedAddress ?: address, error)
+            }) {
                 val connectionStartedAt = SystemClock.elapsedRealtime()
                 val activeBridge = bridge ?: error("前端桥接尚未初始化")
                 _state.update {
@@ -323,6 +366,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         loading = true,
                         bridgeReady = false,
                         error = null,
+                        connectionDiagnosis = null,
                     )
                 }
                 val normalized = LanAddress.normalize(address)
@@ -403,6 +447,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AppLogger.info("服务器连接完成：复用前端=$reusedFrontend，耗时=${SystemClock.elapsedRealtime() - connectionStartedAt}ms")
                 openSocket()
                 refreshAll()
+                refreshServerCapabilities()
                 restoreNotificationWorkflow()
             }
             val retryAfterNetworkChange = networkChangedDuringConnect.getAndSet(false) &&
@@ -451,8 +496,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 bridgeReady = false,
                 workflowDraftConflictRequired = false,
                 workflowDraftConflictReason = "",
+                serverCapabilities = null,
+                serverCapabilitiesError = null,
+                connectionDiagnosis = null,
+                serverAssets = emptyList(),
+                serverAssetsTotal = 0,
+                serverAssetsHasMore = false,
+                serverAssetsError = null,
+                serverJobs = emptyList(),
+                serverJobsTotal = 0,
+                serverJobsHasMore = false,
+                selectedNodeId = null,
+                nodeModes = emptyMap(),
+                executingNodeIds = emptySet(),
+                nodeProgress = emptyMap(),
+                nodePanelNodeId = null,
+                nodePanelError = null,
+                nodePanelChanged = emptyMap(),
             )
         }
+        serverAssetOffset = 0
+        serverJobOffset = 0
     }
 
     fun scanLan() {
@@ -588,6 +652,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = raw,
                     fields = restoredFields,
                     nodes = manifest.nodes,
+                    links = manifest.links,
                     serverUrl = serverUrl,
                     baseModified = if (draft != null && !draftDiscarded) draft.baseModified else entry.modified,
                     hasUnsavedChanges = draft != null && !draftDiscarded,
@@ -616,6 +681,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ""
                         },
                         currentExecutingNodeId = if (promote) activeNode else it.currentExecutingNodeId,
+                        nodeModes = if (promote) initialNodeModes(document) else it.nodeModes,
                         generationMessage = if (promote && it.activeJobId != null && activeNode != null) {
                             executionMessage(activeNode, manifest.nodes, it.generationProgress)
                         } else {
@@ -645,6 +711,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { preferences.setRecentWorkflow(path) }
     }
 
+    /**
+     * 从工作流 JSON 里读回各节点的模式，作为界面上的初始状态。
+     *
+     * 只有非默认（静音 / 绕过）的模式需要记录：始终执行是 LiteGraph 的默认值。
+     */
+    private fun initialNodeModes(document: WorkflowDocument): Map<String, NodeMode> =
+        runCatching { NodeModePolicy.collectModesFromWorkflowJson(document.rawJson) }
+            .getOrDefault(emptyMap())
+            .filterValues { it != NodeMode.ALWAYS }
+
     /** 把当前预读取的工作流正式打开为参数页工作流。 */
     fun openPreviewedWorkflow() {
         val preview = currentPreview() ?: return
@@ -657,6 +733,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fields = preview.fields,
                 nodeProblems = emptyMap(),
                 currentExecutingNodeId = activeNode,
+                nodeModes = initialNodeModes(preview),
                 generationMessage = if (ui.activeJobId != null && activeNode != null) {
                     executionMessage(activeNode, manifestNodes, ui.generationProgress)
                 } else {
@@ -829,7 +906,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ui.copy(loading = false)
                     } else {
                         ui.copy(
-                            selectedWorkflow = edited.copy(fields = manifest.fields, nodes = manifest.nodes),
+                            selectedWorkflow = edited.copy(fields = manifest.fields, nodes = manifest.nodes, links = manifest.links),
                             fields = manifest.fields,
                             loading = false,
                             notice = "高级编辑内容已同步，尚未保存到服务器",
@@ -860,6 +937,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             rawJson = raw,
                             fields = manifest.fields,
                             nodes = manifest.nodes,
+                            links = manifest.links,
                             hasUnsavedChanges = true,
                         ),
                         fields = manifest.fields,
@@ -875,6 +953,416 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeServer(baseUrl: String) {
         viewModelScope.launch { preferences.removeServer(baseUrl) }
+    }
+
+    // ------------------------------------------------------------------
+    // 服务器能力与连接诊断
+    // ------------------------------------------------------------------
+
+    /** 重新读取服务器能力（版本、显存、队列、是否启用资源功能）。 */
+    fun refreshServerCapabilities() {
+        val baseUrl = _state.value.activeServer?.baseUrl ?: client.serverUrl()
+        if (baseUrl.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(serverCapabilitiesLoading = true, serverCapabilitiesError = null) }
+            runCatching { probeServerCapabilities(baseUrl) }
+                .onSuccess { capabilities ->
+                    _state.update {
+                        it.copy(serverCapabilities = capabilities, serverCapabilitiesLoading = false)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update {
+                        it.copy(
+                            serverCapabilitiesLoading = false,
+                            serverCapabilitiesError = error.message ?: "服务器能力读取失败",
+                        )
+                    }
+                }
+        }
+    }
+
+    private suspend fun probeServerCapabilities(baseUrl: String): ServerCapabilities = try {
+        ServerCapabilitiesClient.fetch(baseUrl)
+    } catch (error: UnsupportedEndpointException) {
+        // 老版本服务端没有 /features，只读运行时与队列，资产能力按"未知"处理。
+        if (error.endpoint != "/features") throw error
+        val runtime = ServerCapabilitiesClient.fetchRuntime(baseUrl)
+        val queue = ServerCapabilitiesClient.fetchQueue(baseUrl)
+        ServerCapabilities(
+            comfyVersion = runtime.comfyVersion,
+            frontendVersion = runtime.frontendVersion,
+            templatesVersion = runtime.templatesVersion,
+            pythonVersion = runtime.pythonVersion,
+            pytorchVersion = runtime.pytorchVersion,
+            ramTotal = runtime.ramTotal,
+            ramFree = runtime.ramFree,
+            deviceName = runtime.deviceName,
+            vramTotal = runtime.vramTotal,
+            vramFree = runtime.vramFree,
+            assetsEnabled = false,
+            supportsPreviewMetadata = false,
+            maxUploadSize = 0L,
+            queueRunningCount = queue.runningCount,
+            queuePendingCount = queue.pendingCount,
+            checkedAt = System.currentTimeMillis(),
+        )
+    }
+
+    /** 连接失败时给出中文诊断，并把原始异常原因一并写进 detail。 */
+    private fun applyConnectionDiagnosis(address: String, error: Throwable) {
+        val failure: ConnectionFailure = classifyFailure(address, error)
+        val diagnosis = diagnose(address, failure)
+        val original = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+        val detail = listOf(diagnosis.detail, "原始错误：$original")
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+        _state.update { it.copy(connectionDiagnosis = diagnosis.copy(detail = detail)) }
+    }
+
+    // ------------------------------------------------------------------
+    // 服务器档案
+    // ------------------------------------------------------------------
+
+    /** 重命名一个已保存的服务器；空名字会被忽略。 */
+    fun renameServer(baseUrl: String, name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            runCatching { preferences.renameServer(baseUrl, name) }
+                .onFailure { error -> AppLogger.error("重命名服务器失败", error) }
+        }
+    }
+
+    /** 置顶（或取消置顶）一个已保存的服务器。 */
+    fun setServerPinned(baseUrl: String, pinned: Boolean) {
+        viewModelScope.launch {
+            runCatching { preferences.setServerPinned(baseUrl, pinned) }
+                .onFailure { error -> AppLogger.error("更新服务器置顶状态失败", error) }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 服务器资产与历史
+    // ------------------------------------------------------------------
+
+    fun setServerAssetTag(tag: AssetTag?) {
+        _state.update { it.copy(serverAssetTag = tag) }
+        loadServerAssets(reset = true)
+    }
+
+    fun setServerAssetQuery(query: String) {
+        _state.update { it.copy(serverAssetQuery = query) }
+    }
+
+    /** 按当前的标签与关键字重新读取服务器资产。 */
+    fun searchServerAssets() {
+        loadServerAssets(reset = true)
+    }
+
+    /**
+     * 读取服务器资产。
+     *
+     * @param reset true 表示从头读取，false 表示翻到下一页。
+     */
+    fun loadServerAssets(reset: Boolean) {
+        val baseUrl = _state.value.activeServer?.baseUrl ?: return
+        if (serverAssetsJob?.isActive == true) return
+        if (!reset && !_state.value.serverAssetsHasMore) return
+        serverAssetsJob = viewModelScope.launch {
+            _state.update { it.copy(serverAssetsLoading = true, serverAssetsError = null) }
+            val current = _state.value
+            val offset = if (reset) 0 else serverAssetOffset
+            runCatching {
+                serverAssetsClient.listAssets(
+                    baseUrl = baseUrl,
+                    tag = current.serverAssetTag,
+                    nameContains = current.serverAssetQuery.trim().ifEmpty { null },
+                    limit = SERVER_ASSET_PAGE_SIZE,
+                    offset = offset,
+                )
+            }.onSuccess { page ->
+                serverAssetOffset = ServerAssetPagination.nextOffset(offset, SERVER_ASSET_PAGE_SIZE)
+                _state.update { ui ->
+                    val assets = if (reset) page.assets else ServerAssetPagination.merge(ui.serverAssets, page.assets)
+                    ui.copy(
+                        serverAssets = assets,
+                        serverAssetsTotal = page.total,
+                        serverAssetsHasMore = ServerAssetPagination.hasMore(assets.size, page.total, page.hasMore),
+                        serverAssetsLoading = false,
+                        serverAssetsError = null,
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                _state.update {
+                    it.copy(serverAssetsLoading = false, serverAssetsError = describeServerAssetError(error))
+                }
+            }
+        }
+    }
+
+    /** 加载下一页服务器资产。 */
+    fun loadMoreServerAssets() {
+        loadServerAssets(reset = false)
+    }
+
+    /**
+     * 读取服务器上的历史生成任务。
+     *
+     * @param reset true 表示从头读取，false 表示翻到下一页。
+     */
+    fun loadServerJobs(reset: Boolean) {
+        val baseUrl = _state.value.activeServer?.baseUrl ?: return
+        if (serverJobsJob?.isActive == true) return
+        if (!reset && !_state.value.serverJobsHasMore) return
+        serverJobsJob = viewModelScope.launch {
+            _state.update { it.copy(serverJobsLoading = true, serverAssetsError = null) }
+            val offset = if (reset) 0 else serverJobOffset
+            runCatching {
+                serverAssetsClient.listJobs(
+                    baseUrl = baseUrl,
+                    status = null,
+                    limit = SERVER_JOB_PAGE_SIZE,
+                    offset = offset,
+                )
+            }.onSuccess { page ->
+                serverJobOffset = ServerAssetPagination.nextOffset(offset, SERVER_JOB_PAGE_SIZE)
+                _state.update { ui ->
+                    val jobs = if (reset) page.jobs else ServerAssetPagination.merge(ui.serverJobs, page.jobs) { it.id }
+                    ui.copy(
+                        serverJobs = jobs,
+                        serverJobsTotal = page.total,
+                        serverJobsHasMore = ServerAssetPagination.hasMore(jobs.size, page.total, page.hasMore),
+                        serverJobsLoading = false,
+                        serverAssetsError = null,
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                _state.update {
+                    it.copy(serverJobsLoading = false, serverAssetsError = describeServerAssetError(error))
+                }
+            }
+        }
+    }
+
+    /** 加载下一页历史生成任务。 */
+    fun loadMoreServerJobs() {
+        loadServerJobs(reset = false)
+    }
+
+    /** 删除服务器上的一条历史生成记录。 */
+    fun deleteServerHistoryEntry(promptId: String) {
+        val baseUrl = _state.value.activeServer?.baseUrl ?: return
+        if (promptId.isBlank()) return
+        viewModelScope.launch {
+            runCatching { serverAssetsClient.deleteHistoryEntry(baseUrl, promptId) }
+                .onSuccess { deleted ->
+                    if (!deleted) {
+                        _state.update { it.copy(notice = "服务器没有确认删除该历史记录") }
+                        return@onSuccess
+                    }
+                    _state.update { ui ->
+                        ui.copy(
+                            serverJobs = ui.serverJobs.filterNot { it.id == promptId },
+                            serverAssets = ui.serverAssets.filterNot {
+                                it.promptId == promptId || it.jobId == promptId
+                            },
+                            notice = "已删除服务器历史记录",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(error = "删除服务器历史记录失败：${error.message}") }
+                }
+        }
+    }
+
+    private fun describeServerAssetError(error: Throwable): String = when (error) {
+        is ServerAssetsDisabledException -> "服务器未启用资源（assets）功能，无法读取服务器图片"
+        else -> error.message ?: "读取服务器图片失败"
+    }
+
+    // ------------------------------------------------------------------
+    // 提示词库
+    // ------------------------------------------------------------------
+
+    /** 把一条提示词加入提示词库（提交任务后自动调用）。 */
+    fun addPromptFromHistory(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            runCatching { promptLibraryStore.addFromHistory(trimmed) }
+                .onSuccess { entries -> _state.update { it.copy(promptLibrary = entries) } }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    AppLogger.error("提示词入库失败", error)
+                    _state.update { it.copy(error = "提示词入库失败：${error.message}") }
+                }
+        }
+    }
+
+    /** 把一批提示词写进提示词库（提交任务后自动调用）。 */
+    private suspend fun addPromptsToLibrary(texts: List<String>) {
+        val values = texts.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (values.isEmpty()) return
+        runCatching {
+            var entries = promptLibraryStore.load()
+            values.forEach { entries = promptLibraryStore.addFromHistory(it) }
+            entries
+        }.onSuccess { entries ->
+            _state.update { it.copy(promptLibrary = entries) }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            AppLogger.error("提示词入库失败", error)
+        }
+    }
+
+    fun pinPrompt(id: String) = updatePromptLibrary { promptLibraryStore.pin(id) }
+
+    fun unpinPrompt(id: String) = updatePromptLibrary { promptLibraryStore.unpin(id) }
+
+    fun removePrompt(id: String) = updatePromptLibrary { promptLibraryStore.remove(id) }
+
+    fun clearPromptLibrary() {
+        viewModelScope.launch {
+            runCatching { promptLibraryStore.clear() }
+                .onSuccess { _state.update { it.copy(promptLibrary = emptyList()) } }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(error = "清空提示词库失败：${error.message}") }
+                }
+        }
+    }
+
+    private fun updatePromptLibrary(operation: () -> List<PromptEntry>) {
+        viewModelScope.launch {
+            runCatching { operation() }
+                .onSuccess { entries -> _state.update { it.copy(promptLibrary = entries) } }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(error = "更新提示词库失败：${error.message}") }
+                }
+        }
+    }
+
+    /** 按关键字与分类筛选提示词库。 */
+    fun promptLibraryEntries(keyword: String, category: String?): List<PromptEntry> =
+        PromptLibrarySelection.visible(_state.value.promptLibrary, keyword, category)
+
+    // ------------------------------------------------------------------
+    // 节点模式、节点图与节点面板
+    // ------------------------------------------------------------------
+
+    /** 选中节点图上的一个节点。 */
+    fun selectNode(nodeId: String?) {
+        _state.update { it.copy(selectedNodeId = nodeId) }
+    }
+
+    /**
+     * 切换一个节点的执行模式。
+     *
+     * 节点不存在时直接报错，不会静默忽略；模式同时写进工作副本 JSON 的 nodes[].mode，
+     * 生成时由官方前端构图解析。
+     */
+    fun setNodeMode(nodeId: String, mode: NodeMode) {
+        val document = _state.value.selectedWorkflow
+        if (document == null) {
+            _state.update { it.copy(error = "请先打开工作流再设置节点模式") }
+            return
+        }
+        val knownNodeIds = document.nodes.mapTo(HashSet()) { it.id }
+        when (val change = NodeModeState.apply(_state.value.nodeModes, nodeId, mode, knownNodeIds)) {
+            is NodeModeChange.Rejected -> {
+                _state.update { it.copy(error = change.reason) }
+                return
+            }
+
+            is NodeModeChange.Applied -> {
+                val modes = change.modes
+                val updatedJson = try {
+                    NodeModePolicy.applyToWorkflowJson(document.rawJson, modes)
+                } catch (error: IllegalArgumentException) {
+                    _state.update { it.copy(error = "节点模式写入工作副本失败：${error.message}") }
+                    return
+                }
+                _state.update {
+                    it.copy(
+                        nodeModes = modes,
+                        selectedNodeId = nodeId,
+                        selectedWorkflow = it.selectedWorkflow?.copy(
+                            rawJson = updatedJson,
+                            hasUnsavedChanges = true,
+                        ),
+                    )
+                }
+                scheduleDraftSave()
+            }
+        }
+    }
+
+    /**
+     * 打开节点自带的面板，并把面板改动过的参数写回对应字段。
+     *
+     * 面板由插件在官方前端里绘制，App 只负责定位节点、写入当前值、读回改动。
+     */
+    fun openNodePanel(nodeId: String, widgetName: String? = null) {
+        val activeBridge = bridge
+        if (activeBridge == null) {
+            _state.update { it.copy(nodePanelError = "前端桥接尚未就绪，无法打开节点面板") }
+            return
+        }
+        if (_state.value.selectedWorkflow == null) {
+            _state.update { it.copy(nodePanelError = "请先打开工作流再打开节点面板") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    nodePanelNodeId = nodeId,
+                    nodePanelLoading = true,
+                    nodePanelError = null,
+                    nodePanelChanged = emptyMap(),
+                )
+            }
+            val fields = _state.value.fields.filter { it.nodeId == nodeId }
+            val initial = fields.associate { it.name to it.displayValue }
+            runCatching {
+                val opened = activeBridge.openNodePanel(nodeId, widgetName, initial)
+                if (!opened.ok) error(opened.error ?: "打开节点面板失败")
+                val changed = activeBridge.readNodePanelValues(nodeId)
+                if (changed.isEmpty()) opened.changed else changed
+            }.onSuccess { changed ->
+                applyNodePanelValues(nodeId, changed)
+                _state.update { it.copy(nodePanelLoading = false, nodePanelChanged = changed) }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                _state.update {
+                    it.copy(nodePanelLoading = false, nodePanelError = error.message ?: "节点面板操作失败")
+                }
+            }
+        }
+    }
+
+    private fun applyNodePanelValues(nodeId: String, changed: Map<String, String>) {
+        if (changed.isEmpty()) return
+        val fields = _state.value.fields.filter { it.nodeId == nodeId }
+        changed.forEach { (name, value) ->
+            val field = fields.firstOrNull { it.name == name } ?: fields.firstOrNull { it.label == name }
+            if (field != null) {
+                updateField(field.key, value)
+            } else {
+                AppLogger.info("节点面板改动的参数 $name 在当前工作流里没有对应字段，已忽略")
+            }
+        }
+    }
+
+    fun closeNodePanel() {
+        _state.update {
+            it.copy(nodePanelNodeId = null, nodePanelError = null, nodePanelChanged = emptyMap())
+        }
     }
 
     fun generate() {
@@ -895,13 +1383,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentExecutingNodeId = null,
                 generationProgress = null,
                 generationMessage = "正在整理工作流参数",
+                executingNodeIds = emptySet(),
+                nodeProgress = emptyMap(),
             )
         }
         generationJob = viewModelScope.launch {
             runOperation("提交生成失败") {
                 val generated = bridgeOperationMutex.withLock {
                     ensureSelectedWorkflowLoaded()
-                    (bridge ?: error("前端桥接不可用")).buildPrompt(_state.value.fields)
+                    val nodes = _state.value.selectedWorkflow?.nodes.orEmpty()
+                    val dropped = NodeModeState.droppedNodeIds(_state.value.nodeModes, nodes)
+                    if (dropped.isNotEmpty()) {
+                        AppLogger.info("节点模式里有工作流已不存在的节点，已跳过：${dropped.joinToString(", ")}")
+                    }
+                    // mode 的语义由官方前端构图时解析，所以必须先落到画布上再构图。
+                    (bridge ?: error("前端桥接不可用")).buildPrompt(
+                        _state.value.fields,
+                        NodeModeState.modesForBuild(_state.value.nodeModes, nodes),
+                    )
                 }
                 _state.update { ui ->
                     ui.copy(selectedWorkflow = ui.selectedWorkflow?.copy(
@@ -945,10 +1444,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     bridgeLoadedPath = null
                 }
                 var history = _state.value.promptHistory
-                _state.value.fields
+                val promptTexts = _state.value.fields
                     .filter { it.kind == ParameterKind.MULTILINE && it.nodeType.contains("TextEncode", true) }
-                    .forEach { history = PromptHistory.add(history, it.displayValue) }
+                    .map { it.displayValue }
+                promptTexts.forEach { history = PromptHistory.add(history, it) }
                 preferences.savePromptHistory(history)
+                addPromptsToLibrary(promptTexts)
                 _state.update {
                     it.copy(
                         submittedJobIds = submitted,
@@ -1043,6 +1544,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = workflowJson,
                     fields = manifest?.fields ?: _state.value.fields,
                     nodes = manifest?.nodes ?: document.nodes,
+                    links = manifest?.links ?: document.links,
                     baseModified = saved.modified,
                     hasUnsavedChanges = false,
                     dirtyFieldKeys = emptySet(),
@@ -1115,6 +1617,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = savedJson,
                     fields = manifest?.fields ?: _state.value.fields,
                     nodes = manifest?.nodes ?: document.nodes,
+                    links = manifest?.links ?: document.links,
                     serverUrl = _state.value.activeServer?.baseUrl ?: document.serverUrl,
                     baseModified = saved.modified,
                     hasUnsavedChanges = false,
@@ -1183,6 +1686,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             rawJson = raw,
                             fields = manifest.fields,
                             nodes = manifest.nodes,
+                            links = manifest.links,
                             serverUrl = document.serverUrl,
                             baseModified = current.modified,
                             hasUnsavedChanges = false,
@@ -1257,6 +1761,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = currentJson,
                     fields = manifest.fields,
                     nodes = manifest.nodes,
+                    links = manifest.links,
                     baseModified = moved.modified,
                 )
                 workflowDrafts.delete(document.serverUrl, document.entry.path)
@@ -1270,6 +1775,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 rawJson = currentJson,
                                 fields = manifest.fields,
                                 nodes = manifest.nodes,
+                                links = manifest.links,
                                 baseModified = moved.modified,
                             )
                         } ?: it.selectedWorkflow,
@@ -1319,6 +1825,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = currentJson,
                     fields = manifest.fields,
                     nodes = manifest.nodes,
+                    links = manifest.links,
                     baseModified = moved.modified,
                 )
                 workflowDrafts.delete(document.serverUrl, document.entry.path)
@@ -1332,6 +1839,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 rawJson = currentJson,
                                 fields = manifest.fields,
                                 nodes = manifest.nodes,
+                                links = manifest.links,
                                 baseModified = moved.modified,
                             )
                         } ?: it.selectedWorkflow,
@@ -1551,6 +2059,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             rawJson = json.toString(),
             fields = manifest.fields,
             nodes = manifest.nodes,
+            links = manifest.links,
             serverUrl = _state.value.activeServer?.baseUrl.orEmpty(),
             hasUnsavedChanges = true,
             isTemporary = true,
@@ -1799,6 +2308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     rawJson = workflowJson,
                     fields = manifest.fields,
                     nodes = manifest.nodes,
+                    links = manifest.links,
                     serverUrl = serverUrl,
                     baseModified = 0.0,
                     hasUnsavedChanges = true,
@@ -2688,7 +3198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 字段编辑；随后的 buildPrompt / syncWorkflow 会把当前 fields 再应用到
                 // WebView 上。
                 ui.copy(
-                    selectedWorkflow = document.copy(nodes = manifest.nodes),
+                    selectedWorkflow = document.copy(nodes = manifest.nodes, links = manifest.links),
                     fields = ui.fields,
                 )
             }
@@ -2722,6 +3232,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 rawJson = raw,
                                 fields = manifest.fields,
                                 nodes = manifest.nodes,
+                                links = manifest.links,
                                 hasUnsavedChanges = true,
                             ),
                             fields = manifest.fields,
@@ -2784,6 +3295,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ui.selectedWorkflow?.nodes.orEmpty(),
                         progress,
                     ),
+                    executingNodeIds = ui.executingNodeIds + resolvedNodeId,
+                    nodeProgress = if (progress != null) {
+                        ui.nodeProgress + (resolvedNodeId to progress)
+                    } else {
+                        ui.nodeProgress
+                    },
                 )
             }
             visibleNodeChangedAt = SystemClock.elapsedRealtime()
@@ -2802,6 +3319,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ui.selectedWorkflow?.nodes.orEmpty(),
                             progress,
                         ),
+                        executingNodeIds = ui.executingNodeIds + resolvedNodeId,
+                        nodeProgress = if (progress != null) {
+                            ui.nodeProgress + (resolvedNodeId to progress)
+                        } else {
+                            ui.nodeProgress
+                        },
                     )
                 }
             } else {
@@ -2824,9 +3347,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         visibleNodeJob = viewModelScope.launch {
             delay(waitMillis)
             _state.update { ui ->
-                TaskLifecycle.settle(ui, ui.activeServer?.baseUrl.orEmpty(), promptId, JobState.SUCCESS,
+                val settled = TaskLifecycle.settle(ui, ui.activeServer?.baseUrl.orEmpty(), promptId, JobState.SUCCESS,
                     completionMessages[TaskLifecycle.key(ui.activeServer?.baseUrl.orEmpty(), promptId)]
                         ?: "生成完成，正在确认本地保存状态")
+                settled.copy(executingNodeIds = emptySet(), nodeProgress = emptyMap())
             }
         }
     }
@@ -2979,6 +3503,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             rawJson = raw,
             fields = fields,
             nodes = manifest.nodes,
+            links = manifest.links,
             baseModified = if (loadServerVersion) current.modified else document.baseModified,
             hasUnsavedChanges = if (loadServerVersion) false else document.hasUnsavedChanges,
         )
@@ -3020,7 +3545,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else -> if (media.kind == MediaKind.IMAGE) "image/png" else "video/*"
     }
 
-    private suspend fun runOperation(prefix: String, block: suspend () -> Unit) {
+    private suspend fun runOperation(prefix: String, onError: ((Throwable) -> Unit)? = null, block: suspend () -> Unit) {
         val operation = prefix.removeSuffix("失败")
         AppLogger.info("$operation 开始")
         runCatching { block() }
@@ -3028,6 +3553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .onFailure { error ->
                 if (error is CancellationException) throw error
                 AppLogger.error(prefix, error)
+                onError?.invoke(error)
                 _state.update {
                     val detail = error.message ?: error.javaClass.simpleName
                     val connecting = prefix.startsWith("连接")
@@ -3073,5 +3599,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val MIN_VISIBLE_NODE_MILLIS = 450L
         const val DRAFT_SAVE_DEBOUNCE_MILLIS = 250L
+        const val SERVER_ASSET_PAGE_SIZE = 60
+        const val SERVER_JOB_PAGE_SIZE = 40
     }
 }

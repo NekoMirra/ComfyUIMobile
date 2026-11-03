@@ -1,6 +1,6 @@
 # 本地开发
 
-当前项目根目录为 `E:\AI-Programme\ComfyUI_app`，源码和 Git 仓库直接位于根目录。仓库外无需再放置相邻的 `app/tools`，构建也不依赖旧备份盘。
+仓库根目录即源码与 Git 仓库所在目录。本机 Android SDK 路径写在未跟踪的 `local.properties`（`sdk.dir`）中，仓库不记录任何机器绝对路径。
 
 ## 一键验收
 
@@ -31,8 +31,8 @@ gh auth status
 
 | 路径 | 用途 |
 | --- | --- |
-| `.local/android/jdk17` | JDK 17 |
-| `.local/android/android-sdk` | SDK 36、build-tools 35、ADB |
+| `JDK 21`（PATH） | 构建用 JDK，AGP 9 要求 JDK 21 |
+| `ANDROID_HOME` 指向的 SDK | Android SDK 37、build-tools、ADB |
 | `.local/android/signing` | 原正式签名密钥及私密配置 |
 | `.local/tools` | 独立 Git、GitHub CLI、Node.js |
 | `.local/cache` | Gradle、Maven 和 Robolectric 离线依赖 |

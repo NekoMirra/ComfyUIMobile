@@ -8,7 +8,7 @@
 
 </div>
 
-Your models and workflows stay on your workstation. Use your phone or tablet to browse workflows, edit parameters, submit jobs, and save original results. The app uses Kotlin and Jetpack Compose, with phone navigation, tablet split layouts, and system light / dark themes. The app interface currently prioritizes Simplified Chinese.
+Your models and workflows stay on your workstation. Use your phone or tablet to browse workflows, edit parameters, submit jobs, and save original results. The app uses Kotlin and Jetpack Compose with the Glasmio liquid-glass component set, phone navigation, tablet split layouts, and system light / dark themes. The app interface currently prioritizes Simplified Chinese.
 
 ## Preview
 
@@ -20,9 +20,27 @@ Your models and workflows stay on your workstation. Use your phone or tablet to 
 
 These are native Compose renders with synthetic test data, not private user workflows or artwork.
 
+## What's new in the release candidate
+
+The release-candidate branch merges three feature branches and replaces the whole interface with the Glasmio liquid-glass design system.
+
+| New | What it does |
+| --- | --- |
+| **Server image picker** | Image fields in the parameter page get a **服务器选图** action that browses the server-side image library (filter by input / output tag, search by name) and writes the chosen image back into the field with a thumbnail preview |
+| **Server gallery** | The results page gains a **服务器** segment with **服务器图片** and **历史生成** sub-segments, name filtering, paged loading and job previews |
+| **Workflow node graph** | The parameter page can expand the current workflow into a node graph with links and execution progress; tapping a node jumps to its parameters |
+| **Node bypass / mute** | Every node can be switched between **始终执行 / 静音 / 绕过** (mode 0 / 2 / 4): muted nodes do not enter the execution chain, and a bypassed node is skipped while its downstream input is rewired to the upstream output — the same semantics the ComfyUI frontend uses |
+| **Prompt library** | Frequently used prompts can be saved into a local prompt library, then searched, reused and deleted from the parameter page |
+| **Server capabilities & diagnostics** | The connection screen and settings can read and show the server version, queue and GPU state; settings also gains server profile management (rename, pin, delete) |
+| **Glasmio liquid-glass UI** | Toolbars, segmented pickers, capsule tags, cards, buttons and dialogs now share one Glasmio token set, in both light and dark themes |
+
+> **Minimum system requirement is now Android 13 (API 33).** The Glasmio 0.1.1 artifacts declare `minSdkVersion=33` and `minCompileSdk=37`, so the app must be aligned with them; Android 12 and older devices cannot install this build.
+>
+> Server image picking and the server gallery rely on the server-side asset endpoints. When the server does not expose them the app says so explicitly (“服务器未启用资源功能”) and everything else keeps working.
+
 ## Get started
 
-1. Download the signed release APK from [GitHub Releases](https://github.com/7116-byte/ComfyUIMobile/releases/latest). Android 8.0+ is required. Install over an existing official version to retain data.
+1. Download the signed release APK from [GitHub Releases](https://github.com/7116-byte/ComfyUIMobile/releases/latest). **Android 13 (API 33) or newer is required.** Install over an existing official version to retain data.
 2. Run your own ComfyUI with LAN access enabled. Append `--listen 0.0.0.0` to your existing launch command, preserving other arguments. Allow the actual port through your firewall on a trusted network.
 3. On your phone, first open `http://YOUR_COMPUTER_IP:PORT` in a browser. If reachable, use the same address in the app; for example, `http://192.168.1.20:8188`.
 4. Select a workflow, tap **打开参数** (open parameters), edit it, and tap **生成** (generate).
