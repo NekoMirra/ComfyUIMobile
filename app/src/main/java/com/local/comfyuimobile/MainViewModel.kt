@@ -77,6 +77,7 @@ import com.local.comfyuimobile.network.LanScanner
 import com.local.comfyuimobile.network.ResultParser
 import com.local.comfyuimobile.network.PromptSubmissionException
 import com.local.comfyuimobile.network.ProgressStateParser
+import com.local.comfyuimobile.network.VisibleExecutionState
 import com.local.comfyuimobile.service.JobMonitorService
 import com.local.comfyuimobile.service.JobNotificationNavigation
 import com.local.comfyuimobile.update.UpdateManager
@@ -2149,6 +2150,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 generationProgress = if (executionFailed) null else 1f,
                 generationMessage = message,
                 notice = message,
+                executingNodeIds = emptySet(),
+                nodeProgress = emptyMap(),
             )
         }
     }
@@ -2168,6 +2171,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             generationProgress = null,
                             generationMessage = "任务已取消",
                             notice = "任务已取消：${job.id.take(8)}",
+                            executingNodeIds = emptySet(),
+                            nodeProgress = emptyMap(),
                         )
                     }
                 }
@@ -2190,7 +2195,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (_state.value.activeJobId in pending.map { it.id }) {
                     visibleNodeJob?.cancel()
                     _state.update { it.copy(activeJobId = null, currentExecutingNodeId = null,
-                        generationProgress = null, generationMessage = "等待任务已清空") }
+                        generationProgress = null, generationMessage = "等待任务已清空",
+                        executingNodeIds = emptySet(), nodeProgress = emptyMap()) }
                 }
                 refreshTasksInternal()
             }
@@ -2851,6 +2857,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 generationProgress = null,
                                 generationMessage = "生成失败：$detail",
                                 error = "生成失败：$detail",
+                                // 任务已经结束，节点图上不能留着亮着的执行框。
+                                executingNodeIds = emptySet(),
+                                nodeProgress = emptyMap(),
                             )
                         }
                     }
@@ -3286,22 +3295,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val resolvedNodeId = resolveVisibleNode(nodeId) ?: return
         val applyUpdate = {
             _state.update { ui ->
-                if (promptId != ui.activeJobId) ui else ui.copy(
-                    activeJobId = promptId,
-                    currentExecutingNodeId = resolvedNodeId,
-                    generationProgress = progress ?: ui.generationProgress,
-                    generationMessage = executionMessage(
-                        resolvedNodeId,
-                        ui.selectedWorkflow?.nodes.orEmpty(),
-                        progress,
-                    ),
-                    executingNodeIds = ui.executingNodeIds + resolvedNodeId,
-                    nodeProgress = if (progress != null) {
-                        ui.nodeProgress + (resolvedNodeId to progress)
-                    } else {
-                        ui.nodeProgress
-                    },
-                )
+                if (promptId != ui.activeJobId) ui else {
+                    // 同一时刻只保留当前节点：上一个节点结束后必须熄灯，
+                    // 否则图上会留下一串永远亮着、进度条冻在最后一帧的旧节点。
+                    val visible = VisibleExecutionState.update(resolvedNodeId, progress)
+                    ui.copy(
+                        activeJobId = promptId,
+                        currentExecutingNodeId = resolvedNodeId,
+                        generationProgress = progress ?: ui.generationProgress,
+                        generationMessage = executionMessage(
+                            resolvedNodeId,
+                            ui.selectedWorkflow?.nodes.orEmpty(),
+                            progress,
+                        ),
+                        executingNodeIds = visible.executingNodeIds,
+                        nodeProgress = visible.nodeProgress,
+                    )
+                }
             }
             visibleNodeChangedAt = SystemClock.elapsedRealtime()
         }
@@ -3311,6 +3321,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             visibleNodeJob?.cancel()
             if (current == resolvedNodeId) {
                 _state.update { ui ->
+                    val visible = VisibleExecutionState.update(resolvedNodeId, progress)
                     ui.copy(
                         activeJobId = promptId,
                         generationProgress = progress ?: ui.generationProgress,
@@ -3319,12 +3330,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ui.selectedWorkflow?.nodes.orEmpty(),
                             progress,
                         ),
-                        executingNodeIds = ui.executingNodeIds + resolvedNodeId,
-                        nodeProgress = if (progress != null) {
-                            ui.nodeProgress + (resolvedNodeId to progress)
-                        } else {
-                            ui.nodeProgress
-                        },
+                        executingNodeIds = visible.executingNodeIds,
+                        nodeProgress = visible.nodeProgress,
                     )
                 }
             } else {
