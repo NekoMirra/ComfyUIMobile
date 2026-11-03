@@ -45,6 +45,8 @@ import com.local.comfyuimobile.model.AssetTag
 import com.local.comfyuimobile.model.ServerAsset
 import com.local.comfyuimobile.network.ServerAssetsClient
 import com.local.comfyuimobile.network.ServerAssetsDisabledException
+import com.local.comfyuimobile.network.ServerAssetSupport
+import com.local.comfyuimobile.network.ServerCapabilities
 import kotlinx.coroutines.launch
 
 private const val PAGE_SIZE = 60
@@ -54,6 +56,7 @@ private const val PAGE_SIZE = 60
 internal fun ServerAssetPickerSheet(
     client: ServerAssetsClient,
     baseUrl: String,
+    capabilities: ServerCapabilities? = null,
     onDismiss: () -> Unit,
     onPicked: (ServerAsset) -> Unit,
 ) {
@@ -78,10 +81,19 @@ internal fun ServerAssetPickerSheet(
     LaunchedEffect(query, tag, reloadToken) {
         loading = true
         error = null
+        // 服务端没启用资源功能（或版本太旧）时直接给明确提示，不发注定失败的请求。
+        val disabled = ServerAssetSupport.assetsDisabledMessage(capabilities)
+        if (disabled != null) {
+            error = disabled
+            assets = emptyList()
+            hasMore = false
+            loading = false
+            return@LaunchedEffect
+        }
         try {
             assets = loadPage(0)
         } catch (failure: ServerAssetsDisabledException) {
-            error = "服务器未启用资源功能，无法读取服务器图片"
+            error = ServerAssetSupport.DISABLED_MESSAGE
             assets = emptyList()
             hasMore = false
         } catch (failure: Throwable) {

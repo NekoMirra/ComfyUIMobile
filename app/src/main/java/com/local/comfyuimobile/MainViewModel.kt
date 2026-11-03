@@ -66,6 +66,7 @@ import com.local.comfyuimobile.network.ComfyClient
 import com.local.comfyuimobile.network.ConnectionFailure
 import com.local.comfyuimobile.network.ServerAssetsClient
 import com.local.comfyuimobile.network.ServerAssetsDisabledException
+import com.local.comfyuimobile.network.ServerAssetSupport
 import com.local.comfyuimobile.network.ServerCapabilities
 import com.local.comfyuimobile.network.ServerCapabilitiesClient
 import com.local.comfyuimobile.network.UnsupportedEndpointException
@@ -77,7 +78,7 @@ import com.local.comfyuimobile.network.LanScanner
 import com.local.comfyuimobile.network.ResultParser
 import com.local.comfyuimobile.network.PromptSubmissionException
 import com.local.comfyuimobile.network.ProgressStateParser
-import com.local.comfyuimobile.network.VisibleExecutionState
+import com.local.comfyuimobile.network.VisibleExecution
 import com.local.comfyuimobile.service.JobMonitorService
 import com.local.comfyuimobile.service.JobNotificationNavigation
 import com.local.comfyuimobile.update.UpdateManager
@@ -987,7 +988,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun probeServerCapabilities(baseUrl: String): ServerCapabilities = try {
         ServerCapabilitiesClient.fetch(baseUrl)
     } catch (error: UnsupportedEndpointException) {
-        // 老版本服务端没有 /features，只读运行时与队列，资产能力按"未知"处理。
+        // 老版本服务端没有 /features，只读运行时与队列。
+        // 这类服务端同样没有 /api/assets 与 /api/jobs，资产能力按"未启用"处理，
+        // 与 ServerAssetSupport 的门槛判定一致：不会发出注定失败的请求。
         if (error.endpoint != "/features") throw error
         val runtime = ServerCapabilitiesClient.fetchRuntime(baseUrl)
         val queue = ServerCapabilitiesClient.fetchQueue(baseUrl)
@@ -1070,6 +1073,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val baseUrl = _state.value.activeServer?.baseUrl ?: return
         if (serverAssetsJob?.isActive == true) return
         if (!reset && !_state.value.serverAssetsHasMore) return
+        // 服务端没启用资源功能（或版本太旧）时直接给明确提示，不发注定失败的请求。
+        ServerAssetSupport.assetsDisabledMessage(_state.value.serverCapabilities)?.let { disabled ->
+            _state.update {
+                it.copy(
+                    serverAssetsLoading = false,
+                    serverAssetsError = disabled,
+                    serverAssets = emptyList(),
+                    serverAssetsTotal = 0,
+                    serverAssetsHasMore = false,
+                )
+            }
+            return
+        }
         serverAssetsJob = viewModelScope.launch {
             _state.update { it.copy(serverAssetsLoading = true, serverAssetsError = null) }
             val current = _state.value
@@ -1117,6 +1133,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val baseUrl = _state.value.activeServer?.baseUrl ?: return
         if (serverJobsJob?.isActive == true) return
         if (!reset && !_state.value.serverJobsHasMore) return
+        // 历史生成同样依赖服务端的 /api/jobs，门槛与服务器图片一致。
+        ServerAssetSupport.assetsDisabledMessage(_state.value.serverCapabilities)?.let { disabled ->
+            _state.update {
+                it.copy(
+                    serverJobsLoading = false,
+                    serverAssetsError = disabled,
+                    serverJobs = emptyList(),
+                    serverJobsTotal = 0,
+                    serverJobsHasMore = false,
+                )
+            }
+            return
+        }
         serverJobsJob = viewModelScope.launch {
             _state.update { it.copy(serverJobsLoading = true, serverAssetsError = null) }
             val offset = if (reset) 0 else serverJobOffset
@@ -1182,7 +1211,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun describeServerAssetError(error: Throwable): String = when (error) {
-        is ServerAssetsDisabledException -> "服务器未启用资源（assets）功能，无法读取服务器图片"
+        is ServerAssetsDisabledException -> ServerAssetSupport.DISABLED_MESSAGE
         else -> error.message ?: "读取服务器图片失败"
     }
 
@@ -3298,7 +3327,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (promptId != ui.activeJobId) ui else {
                     // 同一时刻只保留当前节点：上一个节点结束后必须熄灯，
                     // 否则图上会留下一串永远亮着、进度条冻在最后一帧的旧节点。
-                    val visible = VisibleExecutionState.update(resolvedNodeId, progress)
+                    val visible = VisibleExecution(ui.executingNodeIds, ui.nodeProgress)
+                        .executing(resolvedNodeId, progress)
                     ui.copy(
                         activeJobId = promptId,
                         currentExecutingNodeId = resolvedNodeId,
@@ -3321,7 +3351,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             visibleNodeJob?.cancel()
             if (current == resolvedNodeId) {
                 _state.update { ui ->
-                    val visible = VisibleExecutionState.update(resolvedNodeId, progress)
+                    val visible = VisibleExecution(ui.executingNodeIds, ui.nodeProgress)
+                        .executing(resolvedNodeId, progress)
                     ui.copy(
                         activeJobId = promptId,
                         generationProgress = progress ?: ui.generationProgress,

@@ -1225,6 +1225,7 @@ val workflowTitle: @Composable (Modifier) -> Unit = { titleModifier ->
         ServerAssetPickerSheet(
             client = serverAssetsClient,
             baseUrl = serverBaseUrl,
+            capabilities = state.serverCapabilities,
             onDismiss = { serverPickerField = null },
             onPicked = { asset ->
                 val value = ServerGalleryMerge.loadImageValue(
@@ -2066,6 +2067,7 @@ private fun ResultScreen(
                         client = serverAssetsClient,
                         baseUrl = serverBaseUrl,
                         modifier = Modifier.fillMaxSize(),
+                        capabilities = state.serverCapabilities,
                         onOpenAsset = { asset: ServerAsset ->
                             openServerMedia(ServerGalleryMerge.assetToMedia(serverBaseUrl, asset))
                         },
