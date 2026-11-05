@@ -4,9 +4,12 @@
 
 **A native Android companion for your own ComfyUI.**
 
-[Download APK](https://github.com/7116-byte/ComfyUIMobile/releases/latest) · [简体中文](README.md) · [Report an issue](https://github.com/7116-byte/ComfyUIMobile/issues/new/choose)
+[Download APK](https://github.com/NekoMirra/ComfyUIMobile/releases/latest) · [简体中文](README.md) · [Report an issue](https://github.com/NekoMirra/ComfyUIMobile/issues/new/choose)
 
 </div>
+
+> **This repository is a fork.** It is a fork of [7116-byte/ComfyUIMobile](https://github.com/7116-byte/ComfyUIMobile) (`NekoMirra/ComfyUIMobile`) and is signed with an **independent signing key**, so its signature differs from the official upstream build. Nothing is ever pushed back to upstream. Both builds share the package name but not the signature, so they **cannot be installed over each other** — uninstall the official upstream build first.
+
 
 Your models and workflows stay on your workstation. Use your phone or tablet to browse workflows, edit parameters, submit jobs, and save original results. The app uses Kotlin and Jetpack Compose with the Glasmio liquid-glass component set, phone navigation, tablet split layouts, and system light / dark themes. The app interface currently prioritizes Simplified Chinese.
 
@@ -20,9 +23,9 @@ Your models and workflows stay on your workstation. Use your phone or tablet to 
 
 These are native Compose renders with synthetic test data, not private user workflows or artwork.
 
-## What's new in the release candidate
+## What's new in v0.2.0-fork.1
 
-The release-candidate branch merges three feature branches and replaces the whole interface with the Glasmio liquid-glass design system.
+v0.2.0-fork.1 merges three feature branches and replaces the whole interface with the Glasmio liquid-glass design system.
 
 | New | What it does |
 | --- | --- |
@@ -40,7 +43,7 @@ The release-candidate branch merges three feature branches and replaces the whol
 
 ## Get started
 
-1. Download the signed release APK from [GitHub Releases](https://github.com/7116-byte/ComfyUIMobile/releases/latest). **Android 13 (API 33) or newer is required.** Install over an existing official version to retain data.
+1. Download the signed release APK from [GitHub Releases](https://github.com/NekoMirra/ComfyUIMobile/releases/latest). **Android 13 (API 33) or newer is required.** This fork is signed with its own key, so it **cannot be installed over the official upstream build** — uninstall the upstream build first (that clears local data, so back up your work). Over an earlier build *of this fork* the update works in place.
 2. Run your own ComfyUI with LAN access enabled. Append `--listen 0.0.0.0` to your existing launch command, preserving other arguments. Allow the actual port through your firewall on a trusted network.
 3. On your phone, first open `http://YOUR_COMPUTER_IP:PORT` in a browser. If reachable, use the same address in the app; for example, `http://192.168.1.20:8188`.
 4. Select a workflow, tap **打开参数** (open parameters), edit it, and tap **生成** (generate).
@@ -72,4 +75,4 @@ Custom nodes may require advanced editing. Missing models / nodes must be resolv
 
 See [CONTRIBUTING](CONTRIBUTING.md) for Debug builds and PR guidance, [documentation](docs/README.md) for technical notes, and [release notes](RELEASE_NOTES.md) for changes. Please remove private addresses, credentials, prompts, and artwork from issue reports.
 
-Built on [ComfyUI](https://github.com/Comfy-Org/ComfyUI). This is an independent client, not an official Comfy product. Licensed under [MIT](LICENSE).
+Built on [ComfyUI](https://github.com/Comfy-Org/ComfyUI). This is an independent client, not an official Comfy product. This fork (`NekoMirra/ComfyUIMobile`) keeps the upstream MIT [license](LICENSE) and adds its own changes under the same terms.

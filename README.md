@@ -6,15 +6,17 @@
 
 A native Android companion for your own ComfyUI — workflows, parameters, and original results.
 
-[![Release](https://img.shields.io/github/v/release/7116-byte/ComfyUIMobile?label=Release&color=5263CB)](https://github.com/7116-byte/ComfyUIMobile/releases/latest) [![Android](https://img.shields.io/badge/Android-13%2B-3DDC84?logo=android&logoColor=white)](#下载安装) [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](#界面预览) [![License](https://img.shields.io/github/license/7116-byte/ComfyUIMobile?color=688078)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/NekoMirra/ComfyUIMobile?label=Release&color=5263CB)](https://github.com/NekoMirra/ComfyUIMobile/releases/latest) [![Android](https://img.shields.io/badge/Android-13%2B-3DDC84?logo=android&logoColor=white)](#下载安装) [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](#界面预览) [![License](https://img.shields.io/github/license/NekoMirra/ComfyUIMobile?color=688078)](LICENSE)
 
-[**下载 APK**](https://github.com/7116-byte/ComfyUIMobile/releases/latest) · [连接教程](docs/connection-guide.md) · [使用指南](docs/user-guide.md) · [English](README.en.md)
+[**下载 APK**](https://github.com/NekoMirra/ComfyUIMobile/releases/latest) · [连接教程](docs/connection-guide.md) · [使用指南](docs/user-guide.md) · [English](README.en.md)
 
 </div>
 
+> **本仓库为 fork**：本项目是 [7116-byte/ComfyUIMobile](https://github.com/7116-byte/ComfyUIMobile) 的 fork（`NekoMirra/ComfyUIMobile`），使用**独立签名密钥**，与上游官方包签名不同。本 fork 不会向上游推送任何内容；两者包名相同但签名不同，**不能互相覆盖安装**，从上游官方包升级需先卸载上游包。
+
 ## 在手机上，专注创作
 
-当前正式版：[v0.1.74](https://github.com/7116-byte/ComfyUIMobile/releases/tag/v0.1.74) · 支持完整实例的 HTTPS / WSS 连接，设置内可直达项目仓库。
+当前 fork 版：[v0.2.0-fork.1](https://github.com/NekoMirra/ComfyUIMobile/releases/tag/v0.2.0-fork.1) · 支持完整实例的 HTTPS / WSS 连接，设置内可直达本仓库。
 
 工作流和模型留在你的工作站，手机负责选择工作流、调整参数、提交任务和查看作品。日常操作使用原生触控界面；需要遮罩、画板等复杂控件时，再进入服务器的高级编辑。
 
@@ -30,7 +32,7 @@ A native Android companion for your own ComfyUI — workflows, parameters, and o
 
 ## 本轮新增能力
 
-发布候选分支在既有功能之上合并了三条功能分支，并完成整轮界面换肤：
+v0.2.0-fork.1 在既有功能之上合并了三条功能分支，并完成整轮界面换肤：
 
 | 新增 | 说明 |
 | --- | --- |
@@ -62,11 +64,11 @@ A native Android companion for your own ComfyUI — workflows, parameters, and o
 
 ## 下载安装
 
-1. 打开 [最新正式版 Release](https://github.com/7116-byte/ComfyUIMobile/releases/latest)，下载 APK。
+1. 打开 [最新 fork 版 Release](https://github.com/NekoMirra/ComfyUIMobile/releases/latest)，下载 APK。
 2. 在 Android 13（API 33）或以上设备安装，按系统提示允许此次安装。
-3. 已装正式版可直接覆盖更新；也可从 App 的 **设置 → 软件更新** 检查、下载和安装。
+3. 已装本 fork 的旧版可直接覆盖更新；也可从 App 的 **设置 → 软件更新** 检查、下载和安装。
 
-Release 同时提供 APK 的 SHA-256 校验文件。正式版延续原包名与签名；独立的预览版与正式版数据互不相通。旧版检查不到更新时，请从 Release 下载覆盖，详见 [更新检查说明](docs/update-checks.md)。重要作品请另行备份，避免卸载重装。
+Release 同时提供 APK 的 SHA-256 校验文件。**本 fork 使用独立签名密钥，与上游官方包签名不同**：两者包名相同（`com.local.comfyuimobile`）但签名不同，无法互相覆盖安装，从上游官方包升级需先卸载上游包再安装本版本；卸载会清除本地数据，请先备份作品与草稿。本 fork 与上游正式版的数据互不相通。旧版检查不到更新时，请从 Release 下载覆盖，详见 [更新检查说明](docs/update-checks.md)。
 
 ## 三步开始
 
@@ -108,7 +110,7 @@ HTTPS 实例链接请按原样粘贴，例如 `https://实例域名`；省略端
 
 ## 参与项目
 
-遇到问题请 [提交 Issue](https://github.com/7116-byte/ComfyUIMobile/issues/new/choose)，注明 App / ComfyUI 版本、连接类型与复现步骤；请遮盖地址、令牌、提示词和个人作品。欢迎改进兼容性、无障碍、小屏体验及文档，也欢迎分享实际使用反馈。
+遇到问题请 [提交 Issue](https://github.com/NekoMirra/ComfyUIMobile/issues/new/choose)，注明 App / ComfyUI 版本、连接类型与复现步骤；请遮盖地址、令牌、提示词和个人作品。欢迎改进兼容性、无障碍、小屏体验及文档，也欢迎分享实际使用反馈。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -123,4 +125,4 @@ HTTPS 实例链接请按原样粘贴，例如 `https://实例域名`；省略端
 
 基于 [ComfyUI](https://github.com/Comfy-Org/ComfyUI) 的服务端与前端能力，使用 Kotlin、Jetpack Compose、[Glasmio](https://github.com/NEORUAA/Glasmio) 液态玻璃组件、OkHttp、Coil 和 AndroidX Media3 构建。此项目为独立客户端，与 Comfy 组织无隶属关系。
 
-[MIT License](LICENSE) · Copyright © 2026 7116-byte
+[MIT License](LICENSE) · Copyright © 2026 7116-byte · Fork 改动（`NekoMirra/ComfyUIMobile`）同样以 MIT 发布
