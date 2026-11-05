@@ -1092,6 +1092,9 @@ val workflowTitle: @Composable (Modifier) -> Unit = { titleModifier ->
                             node = node,
                             fields = fields,
                             expanded = nodeId in expandedNodeIds,
+                            // 问题节点是程序自动展开的：自动展开不抢滚动位置，
+                            // 否则参数页会被甩走，顶部固定栏里的提示就会压到内容上。
+                            scrollIntoViewOnExpand = nodeId !in problemNodeIds,
                             active = state.currentExecutingNodeId == nodeId,
                             problems = localProblemsByNode[nodeId].orEmpty() + state.nodeProblems[nodeId].orEmpty(),
                             cached = state.cacheOutputRules.any {
@@ -1308,6 +1311,7 @@ private fun NodeParameterCard(
     onUpload: (ParameterField) -> Unit,
     multilineEditorStates: MutableMap<String, TextFieldValue>,
     onMultilineFocusGained: () -> Unit,
+    scrollIntoViewOnExpand: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val title = node.title.ifBlank { node.type.ifBlank { "未命名节点" } }
@@ -1318,10 +1322,13 @@ private fun NodeParameterCard(
             bringIntoViewRequester.bringIntoView()
         }
     }
-    // 展开后参数区会出现在卡片下方，窄屏上这时它已经在可视区之外，
+    // 用户主动展开时，参数区会出现在卡片下方，窄屏上这时它已经在可视区之外，
     // 所以展开时把卡片滚进可视区，用户不用再手动下滑才能看到参数。
-    LaunchedEffect(expanded) {
-        if (expanded) {
+    // 问题节点是程序自动展开的：这时不抢滚动位置，否则参数页会被甩到问题节点上，
+    // 顶部固定栏里的提示就会压到内容上。问题提示本身已经固定在顶部工具栏里，
+    // 用户也可以在节点图上点节点定位过去。
+    LaunchedEffect(expanded, scrollIntoViewOnExpand) {
+        if (expanded && scrollIntoViewOnExpand) {
             kotlinx.coroutines.delay(80)
             bringIntoViewRequester.bringIntoView()
         }
