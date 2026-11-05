@@ -365,7 +365,10 @@ internal object ReleaseUpdateParser {
             "GitHub 未返回有效的正式发布页"
         }
         val tag = parts.last()
-        require(tag.matches(Regex("v?[0-9]+\\.[0-9]+\\.[0-9]+"))) { "发布页版本格式无效" }
+        // Fork releases carry a "-fork.N" suffix (e.g. v0.2.0-fork.1), so the plain
+        // semver shape is widened by an optional suffix while still rejecting any
+        // other path segment.
+        require(tag.matches(Regex("v?[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.]+)?"))) { "发布页版本格式无效" }
         if (VersionComparator.compare(tag, installedVersion) <= 0) return null
         val apk = "https://github.com/$repository/releases/download/$tag/ComfyUIMobile-$tag-release.apk"
         return UpdateInfo(tag, apk, "$apk.sha256", url)

@@ -38,6 +38,29 @@ class ReleaseUpdateParserTest {
         assertTrue(runCatching { ReleaseUpdateParser.fromReleasePage(page + "-beta", "7116-byte/ComfyUIMobile", "0.1.69") }.isFailure)
     }
 
+    @Test fun forkTaggedReleaseIsResolvedFromThePublishedPage() {
+        val page = "https://github.com/NekoMirra/ComfyUIMobile/releases/tag/v0.2.0-fork.1"
+        val info = ReleaseUpdateParser.fromReleasePage(page, "NekoMirra/ComfyUIMobile", "0.1.74")!!
+        assertEquals("v0.2.0-fork.1", info.tag)
+        assertTrue(info.apkUrl.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk"))
+        assertTrue(info.sha256Url!!.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk.sha256"))
+        assertNull(ReleaseUpdateParser.fromReleasePage(page, "NekoMirra/ComfyUIMobile", "0.2.0-fork.1"))
+    }
+
+    @Test fun forkReleaseAssetsFollowTheExpectedNames() {
+        val root = JSONObject("""{
+            "tag_name":"v0.2.0-fork.1", "draft":false, "prerelease":false,
+            "html_url":"https://github.com/NekoMirra/ComfyUIMobile/releases/tag/v0.2.0-fork.1",
+            "assets":[
+              {"name":"ComfyUIMobile-v0.2.0-fork.1-release.apk", "browser_download_url":"https://github.com/NekoMirra/ComfyUIMobile/releases/download/v0.2.0-fork.1/ComfyUIMobile-v0.2.0-fork.1-release.apk"},
+              {"name":"ComfyUIMobile-v0.2.0-fork.1-release.apk.sha256", "browser_download_url":"https://github.com/NekoMirra/ComfyUIMobile/releases/download/v0.2.0-fork.1/ComfyUIMobile-v0.2.0-fork.1-release.apk.sha256"}
+            ]} """)
+        val info = ReleaseUpdateParser.parse(root, "0.1.74")!!
+        assertEquals("v0.2.0-fork.1", info.tag)
+        assertTrue(info.apkUrl.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk"))
+        assertTrue(info.sha256Url!!.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk.sha256"))
+    }
+
     private fun release() = JSONObject("""{
         "tag_name":"v0.1.71", "draft":false, "prerelease":false,
         "html_url":"https://github.com/7116-byte/ComfyUIMobile/releases/tag/v0.1.71",

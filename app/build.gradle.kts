@@ -23,11 +23,15 @@ android {
         applicationId = "com.local.comfyuimobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 174
-        versionName = "0.1.74"
+        // Fork release line. Upstream owns 175/176, so this fork stays on its own
+        // 200 series to avoid colliding with upstream version codes.
+        versionCode = 200
+        versionName = "0.2.0-fork.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "GITHUB_REPOSITORY", "\"7116-byte/ComfyUIMobile\"")
+        // The in-app update check and the settings "GitHub 项目" entry both read this
+        // constant, so they follow the fork instead of the upstream repository.
+        buildConfigField("String", "GITHUB_REPOSITORY", "\"NekoMirra/ComfyUIMobile\"")
     }
 
     signingConfigs {
