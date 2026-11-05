@@ -25,8 +25,11 @@ android {
         targetSdk = 35
         // Fork release line. Upstream owns 175/176, so this fork stays on its own
         // 200 series to avoid colliding with upstream version codes.
-        versionCode = 200
-        versionName = "0.2.0-fork.1"
+        // 0.2.1-fork.1 keeps the numeric triple above the published 0.2.0-fork.1 so
+        // the in-app update check (which compares only the numeric part) sees it as
+        // a newer release.
+        versionCode = 201
+        versionName = "0.2.1-fork.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // The in-app update check and the settings "GitHub 项目" entry both read this
