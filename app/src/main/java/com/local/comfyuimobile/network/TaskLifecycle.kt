@@ -11,7 +11,9 @@ object TaskLifecycle {
     fun settle(ui: AppUiState, server: String, id: String, state: JobState, message: String): AppUiState {
         if (!isTerminal(state) || !matches(server, id, ui.activeServer?.baseUrl, ui.activeJobId)) return ui
         return ui.copy(currentExecutingNodeId = null, generationProgress = if (state == JobState.SUCCESS) 1f else null,
-            generationMessage = message)
+            generationMessage = message,
+            // 任务收尾后节点图上不能留着亮着的执行框。
+            executingNodeIds = emptySet(), nodeProgress = emptyMap())
     }
 
     fun ownsDocument(job: JobSummary, document: WorkflowDocument?): Boolean = when {

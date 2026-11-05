@@ -46,6 +46,8 @@ import com.local.comfyuimobile.model.ServerAsset
 import com.local.comfyuimobile.model.ServerJob
 import com.local.comfyuimobile.network.ServerAssetsClient
 import com.local.comfyuimobile.network.ServerAssetsDisabledException
+import com.local.comfyuimobile.network.ServerAssetSupport
+import com.local.comfyuimobile.network.ServerCapabilities
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +61,7 @@ internal fun ServerGalleryView(
     client: ServerAssetsClient,
     baseUrl: String,
     modifier: Modifier = Modifier,
+    capabilities: ServerCapabilities? = null,
     onOpenAsset: (ServerAsset) -> Unit,
     onOpenJobPreview: (ServerJob) -> Unit,
 ) {
@@ -77,8 +80,8 @@ internal fun ServerGalleryView(
             ) { Text("历史生成") }
         }
         when (segment) {
-            GallerySegment.ASSETS -> ServerAssetGrid(client, baseUrl, onOpenAsset)
-            GallerySegment.JOBS -> ServerJobList(client, baseUrl, onOpenJobPreview)
+            GallerySegment.ASSETS -> ServerAssetGrid(client, baseUrl, capabilities, onOpenAsset)
+            GallerySegment.JOBS -> ServerJobList(client, baseUrl, capabilities, onOpenJobPreview)
         }
     }
 }
@@ -87,6 +90,7 @@ internal fun ServerGalleryView(
 private fun ServerAssetGrid(
     client: ServerAssetsClient,
     baseUrl: String,
+    capabilities: ServerCapabilities?,
     onOpenAsset: (ServerAsset) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -115,10 +119,19 @@ private fun ServerAssetGrid(
     LaunchedEffect(query, reloadToken) {
         loading = true
         error = null
+        // 服务端没启用资源功能（或版本太旧）时直接给明确提示，不发注定失败的请求。
+        val disabled = ServerAssetSupport.assetsDisabledMessage(capabilities)
+        if (disabled != null) {
+            error = disabled
+            assets = emptyList()
+            hasMore = false
+            loading = false
+            return@LaunchedEffect
+        }
         try {
             assets = loadPage(0)
         } catch (failure: ServerAssetsDisabledException) {
-            error = "服务器未启用资源功能，无法读取服务器图片"
+            error = ServerAssetSupport.DISABLED_MESSAGE
             assets = emptyList()
             hasMore = false
         } catch (failure: Throwable) {
@@ -220,6 +233,7 @@ private fun ServerAssetGrid(
 private fun ServerJobList(
     client: ServerAssetsClient,
     baseUrl: String,
+    capabilities: ServerCapabilities?,
     onOpenJobPreview: (ServerJob) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -247,8 +261,21 @@ private fun ServerJobList(
     LaunchedEffect(reloadToken) {
         loading = true
         error = null
+        // 历史生成同样依赖服务端的 /api/jobs，门槛与服务器图片一致。
+        val disabled = ServerAssetSupport.assetsDisabledMessage(capabilities)
+        if (disabled != null) {
+            error = disabled
+            jobs = emptyList()
+            hasMore = false
+            loading = false
+            return@LaunchedEffect
+        }
         try {
             jobs = loadPage(0)
+        } catch (failure: ServerAssetsDisabledException) {
+            error = ServerAssetSupport.DISABLED_MESSAGE
+            jobs = emptyList()
+            hasMore = false
         } catch (failure: Throwable) {
             error = failure.message ?: "读取历史生成失败"
             jobs = emptyList()

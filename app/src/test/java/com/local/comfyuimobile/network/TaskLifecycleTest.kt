@@ -33,6 +33,16 @@ class TaskLifecycleTest {
         assertTrue(TaskLifecycle.isTerminal(state))
     }
 
+    @Test fun completionClearsNodeGraphHighlightAndProgress() {
+        val highlighted = running.copy(
+            executingNodeIds = setOf("12"),
+            nodeProgress = mapOf("12" to 0.4f),
+        )
+        val settled = TaskLifecycle.settle(highlighted, "http://a", "A", JobState.SUCCESS, "完成")
+        assertTrue(settled.executingNodeIds.isEmpty())
+        assertTrue(settled.nodeProgress.isEmpty())
+    }
+
     @Test fun interruptionIsCancellationNotSuccess() {
         assertEquals(JobState.CANCELLED, TaskLifecycle.historyState(JSONObject(
             """{"completed":false,"status_str":"error","messages":[["execution_interrupted",{}]]}""")))
