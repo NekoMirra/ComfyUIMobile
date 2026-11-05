@@ -45,6 +45,10 @@ class ReleaseUpdateParserTest {
         assertTrue(info.apkUrl.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk"))
         assertTrue(info.sha256Url!!.endsWith("ComfyUIMobile-v0.2.0-fork.1-release.apk.sha256"))
         assertNull(ReleaseUpdateParser.fromReleasePage(page, "NekoMirra/ComfyUIMobile", "0.2.0-fork.1"))
+        // Only the "-fork.N" suffix is accepted; any other suffixed tag stays rejected
+        // so a pre-release tag is never reported as a regular update.
+        assertTrue(runCatching { ReleaseUpdateParser.fromReleasePage(page + "-beta", "NekoMirra/ComfyUIMobile", "0.1.74") }.isFailure)
+        assertTrue(runCatching { ReleaseUpdateParser.fromReleasePage("https://github.com/NekoMirra/ComfyUIMobile/releases/tag/v0.2.0-fork.x", "NekoMirra/ComfyUIMobile", "0.1.74") }.isFailure)
     }
 
     @Test fun forkReleaseAssetsFollowTheExpectedNames() {
