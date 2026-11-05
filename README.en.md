@@ -23,9 +23,9 @@ Your models and workflows stay on your workstation. Use your phone or tablet to 
 
 These are native Compose renders with synthetic test data, not private user workflows or artwork.
 
-## What's new in v0.2.0-fork.1
+## What's new in v0.2.1-fork.1
 
-v0.2.0-fork.1 merges three feature branches and replaces the whole interface with the Glasmio liquid-glass design system.
+v0.2.0-fork.1 merged three feature branches and replaced the whole interface with the Glasmio liquid-glass design system; v0.2.1-fork.1 keeps that feature set and fixes an intermittent scroll jump on the parameter page.
 
 | New | What it does |
 | --- | --- |
@@ -36,6 +36,7 @@ v0.2.0-fork.1 merges three feature branches and replaces the whole interface wit
 | **Prompt library** | Frequently used prompts can be saved into a local prompt library, then searched, reused and deleted from the parameter page |
 | **Server capabilities & diagnostics** | The connection screen and settings can read and show the server version, queue and GPU state; settings also gains server profile management (rename, pin, delete) |
 | **Glasmio liquid-glass UI** | Toolbars, segmented pickers, capsule tags, cards, buttons and dialogs now share one Glasmio token set, in both light and dark themes |
+| **Parameter page scroll fix** (v0.2.1-fork.1) | Nodes that the app auto-expands because they have a problem no longer steal the scroll position, so the page content is not pushed out of view and the pinned top bar no longer overlaps it |
 
 > **Minimum system requirement is now Android 13 (API 33).** The Glasmio 0.1.1 artifacts declare `minSdkVersion=33` and `minCompileSdk=37`, so the app must be aligned with them; Android 12 and older devices cannot install this build.
 >
@@ -43,7 +44,7 @@ v0.2.0-fork.1 merges three feature branches and replaces the whole interface wit
 
 ## Get started
 
-1. Download the signed release APK from [GitHub Releases](https://github.com/NekoMirra/ComfyUIMobile/releases/latest). **Android 13 (API 33) or newer is required.** This fork is signed with its own key, so it **cannot be installed over the official upstream build** — uninstall the upstream build first (that clears local data, so back up your work). Over an earlier build *of this fork* the update works in place.
+1. Download the signed release APK from [GitHub Releases](https://github.com/NekoMirra/ComfyUIMobile/releases/latest). **Android 13 (API 33) or newer is required.** This fork is signed with its own key, so it **cannot be installed over the official upstream build** — uninstall the upstream build first (that clears local data, so back up your work). Over an earlier build *of this fork* the update works in place: **0.2.0-fork.1 upgrades directly to 0.2.1-fork.1** with the same signature, keeping your data and needing no uninstall.
 2. Run your own ComfyUI with LAN access enabled. Append `--listen 0.0.0.0` to your existing launch command, preserving other arguments. Allow the actual port through your firewall on a trusted network.
 3. On your phone, first open `http://YOUR_COMPUTER_IP:PORT` in a browser. If reachable, use the same address in the app; for example, `http://192.168.1.20:8188`.
 4. Select a workflow, tap **打开参数** (open parameters), edit it, and tap **生成** (generate).
